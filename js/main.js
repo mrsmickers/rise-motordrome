@@ -287,20 +287,12 @@ function setDirection(rev, restart) {
   if (restart && app.mode === 'drive') restartRun(app.autopilot);
 }
 
-// Back to the grid (or onto a flying lap) for the current direction
+// Back to the grid for the current direction. The hot lap shows the title card, then red lights that turn green.
 function restartRun(hotlap) {
   const tr = app.track, v = app.vehicle;
   app.hud.resetLap();
-  if (hotlap) {
-    const s = tr.wrap(tr.startLine - 450);
-    v.reset(s, tr.lineOffset(s));
-    v.v = v.profile.v[Math.floor(s / tr.lineStep) % v.profile.v.length];
-    app.startPhase = null;
-    $('start-lights').hidden = true;
-  } else {
-    v.reset(tr.wrap(tr.startLine - 9), 2.6);
-    beginStartLights();
-  }
+  v.reset(tr.wrap(tr.startLine - 9), 2.6);
+  beginStartLights(hotlap ? { title: 3.2, green: true } : {});
 }
 
 function toggleSound() {
@@ -325,33 +317,55 @@ async function start(hotlap) {
   app.rig.cinematic = false;
   app.mode = 'drive';
   app.hud.resetLap();
-  app.rig.set(hotlap ? 1 : 0);
+  app.rig.set(2); // cockpit
   setAutopilot(hotlap);
   restartRun(hotlap);
   app.hud.hint('<kbd>W</kbd> throttle · <kbd>S</kbd> brake · <kbd>A</kbd><kbd>D</kbd> steer · <kbd>V</kbd> camera · <kbd>P</kbd> hot lap · <kbd>T</kbd> time of day');
   setTimeout(() => app.hud.hint(''), 9000);
 }
 
-function beginStartLights() {
-  app.startPhase = { t: 0, out: 3.2 + 0.6 + Math.random() * 1.6 };
-  $('start-lights').hidden = false;
+// opts.title: seconds of title card first; opts.green: lights turn green rather than go out
+function beginStartLights(opts = {}) {
+  const title = opts.title || 0;
+  app.startPhase = { t: -title, title, out: 3.2 + 0.6 + Math.random() * 1.6, green: !!opts.green };
+  clearTimeout(app.lightsTimer);
+  const lights = $('start-lights'), card = $('title-card');
+  lights.classList.remove('fade');
+  for (const s of lights.children) s.classList.remove('on', 'go');
+  app.startLights.green.value = 0;
+  lights.hidden = title > 0;
+  card.hidden = !(title > 0);
+  card.classList.remove('show');
+  if (title > 0) requestAnimationFrame(() => card.classList.add('show'));
 }
 
 function updateStartLights(dt) {
   const sp = app.startPhase;
   if (!sp) return;
   sp.t += dt;
+  const lights = $('start-lights'), card = $('title-card');
+  if (sp.t < 0) {
+    if (sp.t > -0.55) card.classList.remove('show');
+    return;
+  }
+  if (!card.hidden) { card.hidden = true; lights.hidden = false; }
   const lit = Math.min(5, Math.floor(sp.t / 0.8) + 1);
   const out = sp.t >= sp.out;
-  const spans = $('start-lights').children;
+  const spans = lights.children;
   for (let i = 0; i < 5; i++) {
     const on = !out && i < lit;
     spans[i].classList.toggle('on', on);
+    spans[i].classList.toggle('go', out && sp.green);
     app.startLights[i].value = on ? 1 : 0;
   }
+  app.startLights.green.value = out && sp.green ? 1 : 0;
   if (out) {
     app.startPhase = null;
-    setTimeout(() => { $('start-lights').hidden = true; }, 900);
+    const keep = sp.green ? 1600 : 900;
+    app.lightsTimer = setTimeout(() => {
+      lights.classList.add('fade');
+      app.lightsTimer = setTimeout(() => { lights.hidden = true; lights.classList.remove('fade'); app.startLights.green.value = 0; }, 650);
+    }, keep);
   }
 }
 
@@ -457,12 +471,18 @@ function frame(dt) {
   if (app.mode === 'drive') {
     if (app.autopilot && inp.active && !app.startPhase) setAutopilot(false);
     updateStartLights(dt);
-    if (app.autopilot) v.autopilot(dt);
-    else {
-      const hold = !!app.startPhase;
-      v.step(dt, hold ? { ...inp, brake: 1, steer: 0 } : inp);
-      if (hold) { v.v = 0; v.gear = 0; v.rpm = Math.max(v.rpm, v.car.engine.idle + inp.throttle * (v.car.engine.shift * 0.75 - v.car.engine.idle)); }
-    }
+    const sp = app.startPhase;
+    if (sp) {
+      // held on the grid: the driver revs once the lights come on (the autopilot does it for you)
+      const eng = v.car.engine;
+      let thr = inp.throttle;
+      if (app.autopilot) thr = sp.t < 0 ? 0 : 0.55 + 0.12 * Math.sin(app.simTime * 9);
+      v.step(dt, { ...inp, throttle: thr, brake: 1, steer: 0 });
+      v.v = 0; v.gear = 0;
+      v.rpm = Math.max(eng.idle, eng.idle + thr * (eng.shift * 0.75 - eng.idle));
+      v.throttle = thr;
+    } else if (app.autopilot) v.autopilot(dt);
+    else v.step(dt, inp);
   } else {
     v.autopilot(dt);
   }
@@ -482,6 +502,8 @@ function frame(dt) {
     if (v.straightMode && !mode) mode = 'Straight-line mode';
     if (v.boost && !mode) mode = 'Boost';
     app.hud.update(v, CARS[app.carIndex], app.rig.label, mode);
+    const cockpit = app.rig.activeId === 'cockpit';
+    if (cockpit !== app.hudCockpit) { app.hudCockpit = cockpit; $('hud').classList.toggle('cam-cockpit', cockpit); }
     const ud = app.carModel.userData;
     if (app.rig.activeId === 'cockpit' && (app.hud.frame % 3 === 0)) {
       const car = CARS[app.carIndex];

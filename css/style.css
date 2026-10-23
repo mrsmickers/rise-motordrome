@@ -82,7 +82,7 @@ kbd { font-family: var(--font-cond); font-size: 11px; padding: 1px 5px; border: 
 /* HUD shell */
 .hud { position: fixed; inset: 0; z-index: 10; pointer-events: none; }
 .hud[hidden] { display: none; }
-.hud.clean > *:not(#start-lights):not(#touch):not(#btn-show) { opacity: 0; pointer-events: none !important; }
+.hud.clean > *:not(#start-lights):not(#title-card):not(#touch):not(#btn-show) { opacity: 0; pointer-events: none !important; }
 .show-hud { display: none; position: absolute; top: var(--gutter); right: var(--gutter); width: 42px; height: 42px; place-items: center; border-radius: 12px; border: 1px solid var(--line);
   background: var(--glass); color: var(--text); cursor: pointer; pointer-events: auto; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
 .hud.clean .show-hud { display: grid; }
@@ -130,6 +130,8 @@ kbd { font-family: var(--font-cond); font-size: 11px; padding: 1px 5px; border: 
 .alt-row .v { font-size: 17px; font-weight: 600; }
 
 .hud-bc { position: absolute; left: 50%; bottom: var(--gutter); transform: translateX(-50%); display: grid; justify-items: center; gap: 8px; width: min(520px, 60vw); text-align: center; }
+/* in the cockpit the wheel's display sits at the bottom centre, so the corner tag and hints move up */
+.hud.cam-cockpit .hud-bc { bottom: calc(var(--gutter) + 19vh); }
 .corner-tag { font: 600 17px/1.1 var(--font-cond); letter-spacing: 0.06em; text-transform: uppercase; padding: 7px 14px; border-radius: 999px; background: var(--glass); border: 1px solid var(--line);
   backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); opacity: 0; transform: translateY(6px); transition: opacity 0.4s, transform 0.4s; }
 .corner-tag.show { opacity: 1; transform: none; }
@@ -173,6 +175,19 @@ kbd { font-family: var(--font-cond); font-size: 11px; padding: 1px 5px; border: 
 .start-lights[hidden] { display: none; }
 .start-lights span { width: 44px; height: 44px; border-radius: 50%; background: #2a0d0d; box-shadow: inset 0 0 0 3px #111; transition: background 0.05s; }
 .start-lights span.on { background: radial-gradient(circle at 40% 35%, #ff8a80, #ff1a1a 45%, #a00000); box-shadow: 0 0 26px rgba(255, 30, 30, 0.85), inset 0 0 0 3px #111; }
+.start-lights span.go { background: radial-gradient(circle at 40% 35%, #b9ffcf, #22e06b 45%, #0a7a35); box-shadow: 0 0 28px rgba(34, 224, 107, 0.9), inset 0 0 0 3px #111; }
+.start-lights.fade { opacity: 0; transition: opacity 0.6s ease; }
+
+/* Title card before the start */
+.title-card { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -58%); width: min(620px, calc(100vw - 32px)); padding: 26px 30px 24px; text-align: center;
+  border-radius: 20px; background: rgba(8, 10, 14, 0.78); border: 1px solid var(--line); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45); opacity: 0; transition: opacity 0.5s ease, transform 0.6s ease; pointer-events: none; }
+.title-card[hidden] { display: none; }
+.title-card.show { opacity: 1; transform: translate(-50%, -50%); }
+.title-card .flagbar { margin: 0 auto 14px; width: 96px; }
+.tc-eyebrow { margin: 0 0 6px; font: 600 14px/1 var(--font-cond); letter-spacing: 0.18em; text-transform: uppercase; color: var(--rw-yellow); }
+.tc-title { margin: 0; font: 700 clamp(38px, 8vw, 72px)/0.95 var(--font-cond); letter-spacing: 0.01em; text-transform: uppercase; }
+.tc-sub { margin: 12px 0 0; font: 500 15px/1.2 var(--font-cond); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
 
 /* Popovers */
 .popover { margin: auto; padding: 18px; width: min(640px, calc(100vw - 32px)); max-height: calc(100vh - 40px); overflow: auto; color: var(--text); border-radius: 18px;

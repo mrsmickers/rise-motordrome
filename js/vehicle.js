@@ -309,7 +309,11 @@ export class Vehicle {
       const vT = prof[i] + (prof[j] - prof[i]) * t;
       // ease onto the line and up to speed from wherever we are
       const dv = vT - this.v;
-      const acc = clamp(dv * 3, -48, 22);
+      // pulling away is limited by rear-tyre traction and power, as from a real standing start
+      const vv = Math.max(this.v, 1);
+      const qd = 0.5 * RHO * vv * vv;
+      const launch = Math.min(car.mu * (G + (qd * car.ClA) / car.mass) * 0.72, powerAt(car, Math.max(this.rpm, car.engine.shift * 0.7), vv) / vv / car.mass, car.era === 'classic' ? 11 : 20);
+      const acc = clamp(dv * 3, -48, Math.min(22, launch));
       const v0 = this.v;
       this.v = Math.max(0, this.v + acc * h);
       this.lonAcc = (this.v - v0) / h;

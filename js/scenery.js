@@ -283,6 +283,8 @@ function buildStartGantry({ track, U, group }) {
   banner.position.set(0, 9.25, 0);
   g.add(banner);
   const lights = [];
+  const green = uniform(0);
+  lights.green = green;
   const podGeo = new THREE.BoxGeometry(0.9, 1.4, 0.5);
   const lampGeo = new THREE.CircleGeometry(0.17, 16);
   for (let i = 0; i < 5; i++) {
@@ -292,7 +294,7 @@ function buildStartGantry({ track, U, group }) {
     g.add(pod);
     const u = uniform(0);
     const lampMat = new THREE.MeshBasicNodeMaterial();
-    lampMat.colorNode = mix(vec3(0.08, 0.01, 0.01), vec3(30, 1.2, 0.8), u);
+    lampMat.colorNode = mix(vec3(0.08, 0.01, 0.01), vec3(30, 1.2, 0.8), u).add(vec3(0.6, 22, 4).mul(green));
     for (let r = 0; r < 2; r++) {
       const lamp = new THREE.Mesh(lampGeo, lampMat);
       lamp.position.set(x, 7.3 - r * 0.55, -0.46);
