@@ -1,7 +1,7 @@
 import * as THREE from 'three/webgpu';
 import {
   Fn, positionLocal, positionWorld, normalLocal, vec2, vec3, vec4, float, mix, smoothstep, step, abs, fract, floor, max, min,
-  mx_noise_float, mx_cell_noise_float, uniform, sin, cos, atan, clamp, time, select, instanceIndex, hash, uv, length
+  mx_noise_float, mx_cell_noise_float, uniform, sin, cos, atan, clamp, time, select, instanceIndex, hash, uv, length, attribute
 } from 'three/tsl';
 import { lakeSdf } from './terrain.js';
 import { LAKE_LEVEL } from './track.js';
@@ -37,6 +37,7 @@ export function buildScenery(track, terrain, U, tvSpots = []) {
   buildLakeside(ctx);
   buildMarshalPosts(ctx);
   buildAirport(ctx);
+  buildVillages(ctx);
   return { group, startLights: ctx.startLights };
 }
 
@@ -513,6 +514,56 @@ function buildAirport({ terrain, group }) {
   roof.position.set(-400, y + 22, -4100);
   group.add(roof);
 }
+
+// ---------- villages: clusters of small houses with tin or tile roofs in the farmland ----------
+function buildVillages({ track, terrain, U, group }) {
+  const rand = mulberry(314);
+  const houses = [];
+  for (let c = 0; c < 70; c++) {
+    const a = rand() * Math.PI * 2, r = 650 + rand() * 1050;
+    const cx = Math.cos(a) * r + 150, cz = Math.sin(a) * r;
+    const info = terrain.infoAt(cx, cz);
+    if (info.dist < 260 || info.lake < 80) continue;
+    if (Math.abs(cz + 4300) < 400) continue;
+    const n = 4 + Math.floor(rand() * 18);
+    const axis = rand() * Math.PI;
+    for (let k = 0; k < n; k++) {
+      const along = (rand() - 0.5) * 160, across = (rand() - 0.5) * 50;
+      const x = cx + Math.cos(axis) * along - Math.sin(axis) * across, z = cz + Math.sin(axis) * along + Math.cos(axis) * across;
+      const i2 = terrain.infoAt(x, z);
+      if (i2.dist < 220 || i2.lake < 60) continue;
+      if (houses.some((h) => Math.hypot(h.x - x, h.z - z) < 13)) continue;
+      houses.push({ x, z, y: terrain.heightAt(x, z), yaw: axis + (rand() < 0.5 ? 0 : Math.PI / 2) + (rand() - 0.5) * 0.3, w: 5 + rand() * 4, l: 7 + rand() * 6, tint: rand(), roof: rand() });
+    }
+  }
+  if (!houses.length) return;
+  const wallGeo = new THREE.BoxGeometry(1, 1, 1); wallGeo.translate(0, 0.5, 0);
+  const roofShape = new THREE.Shape(); roofShape.moveTo(-0.58, 0); roofShape.lineTo(0.58, 0); roofShape.lineTo(0, 0.42); roofShape.lineTo(-0.58, 0);
+  const roofGeo = new THREE.ExtrudeGeometry(roofShape, { depth: 1.08, bevelEnabled: false }); roofGeo.translate(0, 0, -0.54);
+  const wallMat = std({ roughness: 0.9 });
+  const tint = attributeless(houses.map((h) => h.tint));
+  wallMat.colorNode = mix(mix(vec3(0.78, 0.72, 0.62), vec3(0.55, 0.42, 0.3), step(0.55, tint)), vec3(0.62, 0.74, 0.8), step(0.85, tint));
+  wallMat.emissiveNode = vec3(1.0, 0.78, 0.45).mul(U.night).mul(step(0.6, tint)).mul(0.12);
+  const roofMat = std({ roughness: 0.45, metalness: 0.5 });
+  const roofTint = attributeless(houses.map((h) => h.roof));
+  roofMat.colorNode = mix(vec3(0.55, 0.56, 0.58), vec3(0.45, 0.16, 0.1), step(0.6, roofTint));
+  const walls = new THREE.InstancedMesh(wallGeo, wallMat, houses.length);
+  const roofs = new THREE.InstancedMesh(roofGeo, roofMat, houses.length);
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0);
+  houses.forEach((h, i) => {
+    q.setFromAxisAngle(up, h.yaw);
+    walls.setMatrixAt(i, m.compose(new THREE.Vector3(h.x, h.y - 0.5, h.z), q, new THREE.Vector3(h.w, 3.3, h.l)));
+    roofs.setMatrixAt(i, m.compose(new THREE.Vector3(h.x, h.y + 2.8, h.z), q, new THREE.Vector3(h.w, h.w * 0.9, h.l)));
+  });
+  walls.geometry = wallGeo.clone(); walls.geometry.setAttribute('aTint', new THREE.InstancedBufferAttribute(new Float32Array(houses.map((h) => h.tint)), 1));
+  roofs.geometry = roofGeo.clone(); roofs.geometry.setAttribute('aTint', new THREE.InstancedBufferAttribute(new Float32Array(houses.map((h) => h.roof)), 1));
+  walls.castShadow = roofs.castShadow = true;
+  walls.receiveShadow = roofs.receiveShadow = true;
+  walls.name = 'village-walls'; roofs.name = 'village-roofs';
+  group.add(walls, roofs);
+}
+
+function attributeless() { return attribute('aTint', 'float'); }
 
 function mulberry(seed) {
   let a = seed >>> 0;

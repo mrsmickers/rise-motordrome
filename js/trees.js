@@ -5,6 +5,7 @@ import {
 } from 'three/tsl';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { fbm, mulberry32, smoothstep as sstep } from './noise.js';
+import { lakeIslands } from './terrain.js';
 
 // ---------- leaf atlas drawn on a canvas: left = broad leaves, right = fine acacia foliage ----------
 function leafAtlas() {
@@ -202,7 +203,9 @@ export function buildVegetation(track, terrain, U, tvSpots = []) {
   const pit = { a: track.wrap(track.startLine - 320), b: track.wrap(track.startLine + 420) };
   const inPit = (s) => (pit.a > pit.b ? s >= pit.a || s <= pit.b : s >= pit.a && s <= pit.b);
   const near = {};
-  const forestS = track.wrap(5090);
+  // the forest corner: Turns 10-11 round the lake, "only forest and the track"
+  const c10 = track.corners.find((c) => c.n === 10), c11 = track.corners.find((c) => c.n === 11);
+  const forestS = track.wrap(track.forwardS((c10.s + c11.s) / 2));
   const tvGrid = new Map();
   for (const t of tvSpots) tvGrid.set(`${Math.floor(t.x / 40)},${Math.floor(t.z / 40)}`, t);
   const nearTv = (x, z) => {
@@ -217,7 +220,7 @@ export function buildVegetation(track, terrain, U, tvSpots = []) {
     for (let gx = -half; gx < half; gx += cell) {
       const x = gx + rnd() * cell, z = gz + rnd() * cell;
       const info = terrain.infoAt(x, z);
-      if (info.dist < 6 || info.zone > 0.5) continue;
+      if (info.dist < 6 || info.zone > 0.5 || info.crowd > 0.05) continue;
       const sdf = info.lake;
       if (sdf < 6) {
         if (sdf > -18 && rnd() < 0.55) lists.papyrus[info.dist < 150 ? 'near' : 'far'].push({ x, z, s: 0.8 + rnd() * 0.6 });
@@ -234,7 +237,7 @@ export function buildVegetation(track, terrain, U, tvSpots = []) {
         const fr = track.frame(tn.s);
         if (inPit(tn.s) && tn.d > -(fr.half + 110) && tn.d < fr.half + 230) continue;
         let df = Math.abs(tn.s - forestS); df = Math.min(df, track.length - df);
-        density += sstep(260, 60, df) * 0.6;
+        density += sstep(300, 80, df) * 0.9;
         density *= sstep(4, 18, info.dist);
         if (nearTv(x, z)) continue;
       }
@@ -249,6 +252,14 @@ export function buildVegetation(track, terrain, U, tvSpots = []) {
       lists[kind][info.dist < 140 ? 'near' : 'far'].push({ x, z, s: 0.7 + rnd() * 0.65 });
     }
   }
+  // papyrus on the lake islands
+  for (const o of lakeIslands()) {
+    const n = Math.round(o.r * o.r * 0.05);
+    for (let k = 0; k < n; k++) {
+      const a = rnd() * Math.PI * 2, r = Math.sqrt(rnd()) * o.r * 0.85;
+      lists.papyrus.far.push({ x: o.x + Math.cos(a) * r, z: o.z + Math.sin(a) * r * 0.7, s: 0.9 + rnd() * 0.7, water: true });
+    }
+  }
   let total = 0;
   for (const [kind, sets] of Object.entries(lists)) {
     const geo = KINDS[kind].geo();
@@ -260,7 +271,7 @@ export function buildVegetation(track, terrain, U, tvSpots = []) {
       const vars = new Float32Array(list.length * 3);
       const m = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), p = new THREE.Vector3();
       list.forEach((t, i) => {
-        const y = terrain.heightAt(t.x, t.z) - 0.25;
+        const y = t.water ? terrain.lakeLevel + 0.1 : terrain.heightAt(t.x, t.z) - 0.25;
         q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), rnd() * Math.PI * 2);
         const squash = 0.85 + rnd() * 0.3;
         sc.set(t.s, t.s * squash, t.s);

@@ -224,9 +224,10 @@ function runoffMaterial(U) {
   const beige = vec3(0.6, 0.55, 0.46).mul(asphaltBase(p));
   // painted bands next to the kerb, in Rwandan colours
   const band = floor(q.div(1.3));
-  const yellow = vec3(0.78, 0.62, 0.02), terracotta = vec3(0.5, 0.1, 0.06), green = vec3(0.06, 0.32, 0.14), blue = vec3(0.0, 0.32, 0.6);
-  const c0 = select(band.lessThan(0.5), yellow, select(band.lessThan(1.5), terracotta, select(band.lessThan(2.5), green, blue)));
-  const showBands = step(q, 5.2).mul(step(5.5, width));
+  // bands as in the 2026 renders: olive, yellow, red, green, blue, then sand-coloured run-off
+  const olive = vec3(0.3, 0.29, 0.14), yellow = vec3(0.78, 0.6, 0.06), terracotta = vec3(0.5, 0.11, 0.08), green = vec3(0.04, 0.33, 0.27), blue = vec3(0.0, 0.32, 0.6);
+  const c0 = select(band.lessThan(0.5), olive, select(band.lessThan(1.5), yellow, select(band.lessThan(2.5), terracotta, select(band.lessThan(3.5), green, blue))));
+  const showBands = step(q, 6.5).mul(step(6.8, width));
   const col = mix(beige, c0, showBands);
   mat.colorNode = col;
   mat.roughnessNode = float(0.8);

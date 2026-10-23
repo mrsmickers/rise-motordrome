@@ -3,7 +3,7 @@ import {
   Fn, reflector, positionWorld, cameraPosition, normalize, vec2, vec3, vec4, float, mix, pow, max, dot, reflect,
   mx_noise_float, time, smoothstep, clamp, uniform
 } from 'three/tsl';
-import { LAKE_BLOBS } from './terrain.js';
+import { LAKE_BLOBS, lakeIslands } from './terrain.js';
 import { LAKE_LEVEL } from './track.js';
 
 // Lake Kidogo: planar reflection, wind ripples and a sun glint
@@ -45,5 +45,26 @@ export function buildLake(U) {
   mesh.name = 'lake';
   const group = new THREE.Group();
   group.add(mesh, refl.target);
+  // papyrus islands: low ragged mats of green just above the water
+  const shape = new THREE.Shape();
+  for (let i = 0; i <= 28; i++) {
+    const a = (i / 28) * Math.PI * 2;
+    const r = 1 + 0.22 * Math.sin(a * 3 + 1.3) + 0.12 * Math.sin(a * 7 + 0.4);
+    shape[i ? 'lineTo' : 'moveTo'](Math.cos(a) * r, Math.sin(a) * r);
+  }
+  const islandGeo = new THREE.ExtrudeGeometry(shape, { depth: 0.5, bevelEnabled: true, bevelThickness: 0.3, bevelSize: 0.06, bevelSegments: 2 });
+  islandGeo.rotateX(-Math.PI / 2);
+  const islandMat = new THREE.MeshStandardNodeMaterial({ roughness: 0.95 });
+  islandMat.colorNode = vec3(0.07, 0.17, 0.05).mul(mx_noise_float(positionWorld.mul(0.4)).mul(0.25).add(0.9)).mul(mix(float(1), float(0.08), U.night));
+  const list = lakeIslands();
+  const im = new THREE.InstancedMesh(islandGeo, islandMat, list.length);
+  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion();
+  list.forEach((o, i) => {
+    q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), o.rot);
+    im.setMatrixAt(i, m4.compose(new THREE.Vector3(o.x, LAKE_LEVEL - 0.35, o.z), q, new THREE.Vector3(o.r, 1, o.r * 0.7)));
+  });
+  im.receiveShadow = true;
+  im.name = 'lake-islands';
+  group.add(im);
   return group;
 }

@@ -1,7 +1,7 @@
 import * as THREE from 'three/webgpu';
 import {
   Fn, attribute, positionWorld, normalWorld, vec2, vec3, float, mix, smoothstep, clamp, abs, fract, floor, max, min,
-  mx_noise_float, mx_cell_noise_float, uniform, dot, sin, cos, step, bumpMap
+  mx_noise_float, mx_cell_noise_float, uniform, dot, sin, cos, step, bumpMap, length, fwidth
 } from 'three/tsl';
 import { fbm, ridged, smoothstep as sstep, clamp as cl, lerp } from './noise.js';
 import { LAKE_LEVEL } from './track.js';
@@ -23,6 +23,24 @@ export function lakeSdf(x, z) {
   }
   // ragged shore
   return res + fbm(x * 0.012, z * 0.012, 3, 91) * 45;
+}
+
+// Floating papyrus islands in the shallows, as in the renders of Lake Kidogo
+let _islands = null;
+export function lakeIslands() {
+  if (_islands) return _islands;
+  const out = [];
+  let seed = 77;
+  const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+  for (let tries = 0; tries < 4000 && out.length < 46; tries++) {
+    const x = -2100 + rnd() * 1900, z = -1100 + rnd() * 2100;
+    const sdf = lakeSdf(x, z);
+    if (sdf > -30 || sdf < -260) continue;
+    const r = 12 + rnd() * 38 * (sdf < -120 ? 1 : 0.6);
+    if (out.some((o) => Math.hypot(o.x - x, o.z - z) < o.r + r + 25)) continue;
+    out.push({ x, z, r, rot: rnd() * 6.28 });
+  }
+  return (_islands = out);
 }
 
 const NEAR = { size: 3600, step: 6 };
@@ -164,12 +182,28 @@ export class Terrain {
     };
     const pitA = tr.pitStart, pitB = tr.pitEnd;
     const inRange = (s, a, b) => (a > b ? s >= a || s <= b : s >= a && s <= b);
+    // two hills of spectators, 35,000-40,000 on each (Wurz): the bowl round Turns 2-3 and the
+    // hillside round the top hairpin and the canopy corner. side: +1 left of travel, -1 right
+    const cs = (n) => tr.corners.find((c) => c.n === n).s;
+    const banks = [
+      { a: cs(2) - 120, b: cs(3) - 60, side: 1 }, { a: cs(2) - 40, b: cs(2) + 160, side: -1 },
+      { a: cs(8) - 160, b: cs(9) + 60, side: -1 }, { a: cs(8) - 60, b: cs(8) + 120, side: 1 }
+    ].map((k) => ({ ...k, a: tr.wrap(k.a), b: tr.wrap(k.b) }));
+    const crowdAt = (s, d, out) => {
+      let c = 0;
+      for (const k of banks) {
+        if (!inRange(s, k.a, k.b) || Math.sign(d) !== k.side) continue;
+        const edge = Math.min(tr.wrap(s - k.a), tr.wrap(k.b - s));
+        c = Math.max(c, sstep(0, 40, edge) * sstep(5, 12, out) * (1 - sstep(55, 80, out)));
+      }
+      return c;
+    };
     for (let j = 0; j < n; j++) {
       for (let i = 0; i < n; i++) {
         const id = j * n + i;
         const x = -half + i * step, z = -half + j * step;
         let h = this.natural(x, z);
-        let dist = 1e9, zone = 0;
+        let dist = 1e9, zone = 0, crowd = 0;
         if (best1[id] < 1e9) {
           const a = target(s1[id], x, z);
           let c1 = 1 - sstep(2, BLEND, a.out);
@@ -186,6 +220,7 @@ export class Terrain {
             dist = Math.min(dist, b.out);
           }
           h = lerp(h, hh, c1 * c1 * (3 - 2 * c1));
+          crowd = crowdAt(tr.wrap(a.s), a.d, a.out);
           // paddock terraces on the left of the main straight, stands on the right
           const s = tr.wrap(a.s);
           if (inRange(s, tr.wrap(pitA - 80), tr.wrap(pitB + 60))) {
@@ -210,7 +245,7 @@ export class Terrain {
         info[id * 4] = Math.min(dist, 3000);
         info[id * 4 + 1] = zone;
         info[id * 4 + 2] = lakeSdf(x, z);
-        info[id * 4 + 3] = 0;
+        info[id * 4 + 3] = crowd;
       }
     }
     this.near.H = H;
@@ -250,9 +285,9 @@ export class Terrain {
   infoAt(x, z) {
     const { n, step, half, info } = this.near;
     const i = Math.round((x + half) / step), j = Math.round((z + half) / step);
-    if (i < 0 || j < 0 || i >= n || j >= n) return { dist: this.trackDistCoarse(x, z), zone: 0, lake: lakeSdf(x, z) };
+    if (i < 0 || j < 0 || i >= n || j >= n) return { dist: this.trackDistCoarse(x, z), zone: 0, lake: lakeSdf(x, z), crowd: 0 };
     const id = (j * n + i) * 4;
-    return { dist: info[id], zone: info[id + 1], lake: info[id + 2] };
+    return { dist: info[id], zone: info[id + 1], lake: info[id + 2], crowd: info[id + 3] };
   }
 
   buildMeshes(uniforms) {
@@ -340,18 +375,21 @@ function createTerrainMaterial(U) {
     const nMid = mx_noise_float(vec3(p.mul(0.017), 1.3));
     const nFine = mx_noise_float(vec3(p.mul(0.21), 2.7));
     const nGrain = mx_noise_float(vec3(p.mul(1.7), 4.1));
-    const lush = vec3(0.075, 0.15, 0.035);
+    const lush = vec3(0.09, 0.16, 0.04);
     const verge = vec3(0.085, 0.175, 0.035);
-    const dry = vec3(0.27, 0.24, 0.1);
-    const savanna = vec3(0.4, 0.33, 0.17);
-    const scrub = vec3(0.075, 0.12, 0.04);
-    const earth = vec3(0.34, 0.15, 0.08);
+    const dry = vec3(0.36, 0.29, 0.14);
+    const savanna = vec3(0.47, 0.37, 0.2);
+    const scrub = vec3(0.1, 0.13, 0.05);
+    const earth = vec3(0.44, 0.2, 0.1);
     const wet = vec3(0.07, 0.15, 0.06);
     const mud = vec3(0.16, 0.13, 0.09);
     const d = dist.add(nMid.mul(55)).add(nBig.mul(140));
-    const c = mix(verge, lush, smoothstep(10.0, 50.0, dist)).toVar();
-    c.assign(mix(c, dry, smoothstep(60.0, 320.0, d).mul(0.75)));
-    c.assign(mix(c, savanna, smoothstep(380.0, 1400.0, d)));
+    const c = mix(verge, lush, smoothstep(10.0, 40.0, dist)).toVar();
+    c.assign(mix(c, dry, smoothstep(25.0, 140.0, d)));
+    c.assign(mix(c, savanna, smoothstep(200.0, 900.0, d)));
+    // bare red laterite showing through the dry grass, as on the site today
+    const soil = smoothstep(0.05, 0.45, mx_noise_float(vec3(p.mul(0.011), 11.0)).add(nFine.mul(0.25))).mul(smoothstep(30.0, 120.0, dist));
+    c.assign(mix(c, earth.mul(float(0.9).add(nGrain.mul(0.1))), soil.mul(0.75)));
     // patchwork farm plots further out
     const ang = float(0.42);
     const ruv = vec2(p.x.mul(cos(ang)).sub(p.y.mul(sin(ang))), p.x.mul(sin(ang)).add(p.y.mul(cos(ang)))).div(vec2(46.0, 78.0));
@@ -374,6 +412,26 @@ function createTerrainMaterial(U) {
     const slope = float(1.0).sub(normalWorld.y);
     c.assign(mix(c, earth.mul(0.9), smoothstep(0.18, 0.42, slope).mul(0.8)));
     c.mulAssign(float(0.86).add(nFine.mul(0.12)).add(nGrain.mul(0.06)));
+    // spectators on the hillsides: heads and shoulders on a jittered grid, gaps of trodden grass
+    const crowd = info.w;
+    const g = p.div(0.78);
+    const cellId = floor(g);
+    const h1 = mx_cell_noise_float(vec3(cellId, 3.0)), h2 = mx_cell_noise_float(vec3(cellId, 9.0)), h3 = mx_cell_noise_float(vec3(cellId, 17.0));
+    const centre = vec2(h2, h3).mul(0.5).add(0.25);
+    const r = length(fract(g).sub(centre));
+    const groups = mx_noise_float(vec3(p.mul(0.06), 2.0)).mul(0.5).add(0.5);
+    const occupied = step(float(1).sub(crowd.mul(0.85)), groups.mul(0.6).add(h1.mul(0.55)));
+    const shirt = mix(mix(vec3(0.05, 0.08, 0.2), vec3(0.42, 0.06, 0.05), step(0.3, h1)), mix(vec3(0.62, 0.5, 0.05), vec3(0.06, 0.26, 0.12), step(0.62, h2)), step(0.55, h1));
+    const shirt2 = mix(shirt, vec3(0.7, 0.7, 0.66), step(0.9, h3)).mul(0.8);
+    const headCol = mix(vec3(0.07, 0.045, 0.03), vec3(0.16, 0.1, 0.07), h2);
+    const person = mix(shirt2, headCol, smoothstep(0.17, 0.1, r));
+    const body = smoothstep(0.36, 0.3, r);
+    const trodden = mix(c, vec3(0.2, 0.16, 0.08), 0.45);
+    const near = mix(trodden.mul(0.8), person, body.mul(occupied));
+    // far away the dots blend to their average so the hillside does not shimmer
+    const far = mix(trodden.mul(0.85), mix(trodden, shirt2, 0.55).mul(0.7), occupied.mul(0.0).add(crowd.mul(0.75)));
+    const blur = smoothstep(0.25, 0.9, fwidth(g.x).add(fwidth(g.y)));
+    c.assign(mix(c, mix(near, far, blur), smoothstep(0.05, 0.35, crowd)));
     return c;
   });
   const col = colour();

@@ -8,7 +8,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 // Car local frame: +z forward, +x left, +y up, origin on the ground at mid wheelbase.
 
 // Loft a closed body through superellipse sections {z, w, h, y, x?, n?}
-function loft(sections, K = 30) {
+function loft(sections, K = 30, cut = null) {
   const pos = [], uvs = [], idx = [];
   const S = sections.length;
   for (let i = 0; i < S; i++) {
@@ -36,7 +36,8 @@ function loft(sections, K = 30) {
   g.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
   g.setIndex(idx);
   g.computeVertexNormals();
-  const side = g.toNonIndexed();
+  let side = g.toNonIndexed();
+  if (cut) side = cutOpening(side, cut);
   // flat caps with their own normals
   const cp = [], cu = [];
   const capEnd = (i, back) => {
@@ -55,6 +56,65 @@ function loft(sections, K = 30) {
   caps.setAttribute('uv', new THREE.Float32BufferAttribute(cu, 2));
   caps.computeVertexNormals();
   return mergeGeometries([side, caps]);
+}
+
+// Drop the skin triangles over the cockpit so the driver, wheel and tub show through
+function cutOpening(geo, { z0, z1, halfW, yMin }) {
+  const keep = [];
+  const pos = geo.attributes.position;
+  for (let t = 0; t < pos.count; t += 3) {
+    let inside = true;
+    for (let k = 0; k < 3; k++) {
+      const x = pos.getX(t + k), y = pos.getY(t + k), z = pos.getZ(t + k);
+      if (!(z >= z0 && z <= z1 && Math.abs(x) <= halfW && y >= yMin)) { inside = false; break; }
+    }
+    if (!inside) keep.push(t);
+  }
+  const out = new THREE.BufferGeometry();
+  for (const [name, attr] of Object.entries(geo.attributes)) {
+    const s = attr.itemSize, arr = new Float32Array(keep.length * 3 * s);
+    keep.forEach((t, i) => arr.set(attr.array.subarray(t * s, (t + 3) * s), i * 3 * s));
+    out.setAttribute(name, new THREE.BufferAttribute(arr, s));
+  }
+  return out;
+}
+
+// Point on the body surface: half-width of a lofted body at height y and station z
+function bodyHalfWidth(sections, z, y) {
+  let a = sections[0], b = sections[sections.length - 1];
+  for (let i = 0; i < sections.length - 1; i++) {
+    if (z <= sections[i].z && z >= sections[i + 1].z) { a = sections[i]; b = sections[i + 1]; break; }
+  }
+  const t = a.z === b.z ? 0 : (a.z - z) / (a.z - b.z);
+  const L = (k, d) => (a[k] ?? d) + ((b[k] ?? d) - (a[k] ?? d)) * t;
+  const w = L('w'), h = L('h'), yc = L('y'), n = L('n', 3);
+  const r = Math.min(0.92, Math.abs(y - yc) / h);
+  return w * Math.pow(1 - Math.pow(r, n), 1 / n);
+}
+
+// Open cockpit: dark tub with padded rim, driver's shoulders and arms reaching to the wheel
+function cockpit(P, c) {
+  const { z0, z1, halfW, floorY, rimY, wheel, shoulderY, shoulderZ } = c;
+  const tub = new THREE.BoxGeometry(halfW * 2, rimY - floorY, z1 - z0);
+  tub.translate(0, (rimY + floorY) / 2, (z0 + z1) / 2);
+  P.tub.push(tub);
+  const rim = new THREE.CatmullRomCurve3(Array.from({ length: 24 }, (_, i) => {
+    const a = (i / 24) * Math.PI * 2;
+    const zc = (z0 + z1) / 2, zr = (z1 - z0) / 2;
+    return new THREE.Vector3(Math.cos(a) * halfW, rimY + 0.012, zc + Math.sin(a) * zr);
+  }), true);
+  P.dark.push(new THREE.TubeGeometry(rim, 48, 0.022, 6, true));
+  const torso = new THREE.SphereGeometry(1, 16, 10);
+  torso.scale(0.2, 0.09, 0.16); torso.translate(0, shoulderY - 0.03, shoulderZ - 0.06);
+  P.suit.push(torso);
+  for (const s of [1, -1]) {
+    const sh = [s * 0.16, shoulderY, shoulderZ];
+    const elbow = [s * 0.2, (shoulderY + wheel.y) / 2 - 0.05, (shoulderZ + wheel.z) / 2];
+    const hand = [s * 0.135, wheel.y - 0.005, wheel.z - 0.03];
+    P.suit.push(strut(sh, elbow, 0.04, 1));
+    P.suit.push(strut(elbow, hand, 0.034, 1));
+    P.glove.push(new THREE.SphereGeometry(0.038, 10, 8).translate(...hand));
+  }
 }
 
 // Airfoil extruded across the car (span along x)
@@ -256,7 +316,7 @@ export function buildCar(car) {
     return mix(vec3(new THREE.Color(car.livery.accent)), vec3(new THREE.Color(car.livery.base)), stripe);
   })();
   const visor = new THREE.MeshPhysicalNodeMaterial({ color: 0x0a0d12, roughness: 0.05, metalness: 0.6, clearcoat: 1 });
-  const parts = { paint: [], carbon: [], matt: [], metal: [], dark: [] };
+  const parts = { paint: [], carbon: [], matt: [], metal: [], dark: [], tub: [], suit: [], glove: [] };
   const geo = era === 'classic' ? classicGeometry(parts) : era === 'v10' ? v10Geometry(parts) : modernGeometry(parts);
 
   const add = (list, mat) => {
@@ -266,6 +326,9 @@ export function buildCar(car) {
     root.add(m);
   };
   add(parts.paint, paint); add(parts.carbon, carbon); add(parts.matt, matt); add(parts.metal, metal); add(parts.dark, dark);
+  add(parts.tub, new THREE.MeshStandardNodeMaterial({ color: 0x0c0d10, roughness: 0.85, side: THREE.BackSide }));
+  add(parts.suit, new THREE.MeshStandardNodeMaterial({ color: new THREE.Color(car.livery.base).multiplyScalar(0.55), roughness: 0.9 }));
+  add(parts.glove, new THREE.MeshStandardNodeMaterial({ color: new THREE.Color(car.livery.accent).multiplyScalar(0.7), roughness: 0.8 }));
 
   // driver helmet
   const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.135, 24, 16), helmetMat);
@@ -362,19 +425,32 @@ function buildSteeringWheel(era) {
     group.add(new THREE.Mesh(rimG, new THREE.MeshStandardNodeMaterial({ color: 0x3a2a1c, roughness: 0.6 })));
     return { group, canvas, tex, draw: () => {} };
   }
-  const body = new THREE.Mesh(new THREE.BoxGeometry(0.27, 0.13, 0.05), bodyMat);
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.12, 0.04), bodyMat);
   group.add(body);
   for (const s of [1, -1]) {
-    const grip = new THREE.Mesh(new THREE.CapsuleGeometry(0.025, 0.09, 4, 8), bodyMat);
-    grip.position.set(s * 0.14, -0.01, 0);
+    const grip = new THREE.Mesh(new THREE.CapsuleGeometry(0.026, 0.085, 4, 10), bodyMat);
+    grip.position.set(s * 0.125, -0.012, 0);
+    grip.rotation.z = s * 0.12;
     group.add(grip);
   }
+  // rotary switches and buttons round the screen
+  const knobMat = new THREE.MeshStandardNodeMaterial({ color: 0x8a8f96, metalness: 0.8, roughness: 0.3 });
+  const btnCols = [0xff3b30, 0xfad201, 0x22e06b, 0x3b8bff];
+  for (let i = 0; i < 4; i++) {
+    const k = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.011, 0.012, 12), knobMat);
+    k.rotation.x = Math.PI / 2; k.position.set((i < 2 ? -1 : 1) * 0.07, i % 2 ? -0.04 : 0.042, -0.024);
+    group.add(k);
+    const bt = new THREE.Mesh(new THREE.CylinderGeometry(0.007, 0.007, 0.006, 10), new THREE.MeshStandardNodeMaterial({ color: btnCols[i], roughness: 0.4 }));
+    bt.rotation.x = Math.PI / 2; bt.position.set((i - 1.5) * 0.03, -0.047, -0.022);
+    group.add(bt);
+  }
   const screenMat = new THREE.MeshBasicNodeMaterial({ map: tex });
-  const screen = new THREE.Mesh(new THREE.PlaneGeometry(0.11, 0.055), screenMat);
-  screen.position.set(0, 0.012, -0.027);
+  const screen = new THREE.Mesh(new THREE.PlaneGeometry(0.1, 0.05), screenMat);
+  screen.position.set(0, 0.008, -0.021);
   screen.rotation.y = Math.PI;
   group.add(screen);
-  group.rotation.x = -0.35;
+  // tilted back so its face looks up at the driver
+  group.rotation.x = 0.55;
   const g = canvas.getContext('2d');
   let last = '';
   const draw = (gear, speed, rpmFrac) => {
@@ -400,7 +476,7 @@ function buildSteeringWheel(era) {
 // 2026 car: low nose, narrow wings, halo, wheel covers
 function modernGeometry(P) {
   const fa = 1.7, ra = -1.7;
-  P.paint.push(loft([
+  const chassis = [
     { z: 2.66, w: 0.05, h: 0.035, y: 0.22, n: 2.6 },
     { z: 2.45, w: 0.09, h: 0.065, y: 0.25, n: 2.8 },
     { z: 2.1, w: 0.135, h: 0.095, y: 0.3, n: 3 },
@@ -415,7 +491,9 @@ function modernGeometry(P) {
     { z: -1.95, w: 0.13, h: 0.15, y: 0.4, n: 2.8 },
     { z: -2.32, w: 0.07, h: 0.09, y: 0.35, n: 2.6 },
     { z: -2.46, w: 0.02, h: 0.03, y: 0.33, n: 2.4 }
-  ]));
+  ];
+  P.paint.push(loft(chassis, 30, { z0: -0.13, z1: 0.53, halfW: 0.235, yMin: 0.6 }));
+  cockpit(P, { z0: -0.13, z1: 0.53, halfW: 0.235, floorY: 0.3, rimY: 0.705, wheel: { y: 0.67, z: 0.36 }, shoulderY: 0.63, shoulderZ: -0.02 });
   // engine cover and airbox
   P.paint.push(loft([
     { z: -0.06, w: 0.12, h: 0.13, y: 0.86, n: 2.6 },
@@ -443,8 +521,6 @@ function modernGeometry(P) {
     const inlet = loft([{ z: 0.665, w: 0.15, h: 0.11, y: 0.445, x: 0.43, n: 3.4 }, { z: 0.64, w: 0.14, h: 0.1, y: 0.445, x: 0.43, n: 3.4 }]);
     P.dark.push(s > 0 ? inlet : mirrorX(inlet));
   }
-  // cockpit opening
-  P.dark.push(loft([{ z: 0.55, w: 0.01, h: 0.01, y: 0.72 }, { z: 0.45, w: 0.2, h: 0.03, y: 0.715, n: 2.4 }, { z: -0.05, w: 0.24, h: 0.03, y: 0.73, n: 3 }, { z: -0.12, w: 0.01, h: 0.01, y: 0.74 }]));
   // floor with tapering edges
   const fl = new THREE.Shape();
   const outline = [[0.3, 1.25], [0.62, 0.95], [0.9, 0.62], [0.92, -1.25], [0.78, -1.7], [0.55, -2.15], [-0.55, -2.15], [-0.78, -1.7], [-0.92, -1.25], [-0.9, 0.62], [-0.62, 0.95], [-0.3, 1.25]];
@@ -470,8 +546,8 @@ function modernGeometry(P) {
   for (const s of [1, -1]) P.paint.push(plate(0.56, 0.6, 0.014, s * 0.505, 0.46, -2.3, 0, 0.35));
   P.carbon.push(plate(0.22, 0.38, 0.03, 0, 0.5, -2.05, 0, 0.1));
   // suspension
-  addSuspension(P, fa, 0.8, 0.5, 0.25, true);
-  addSuspension(P, ra, 0.78, 0.48, 0.24, false);
+  addSuspension(P, fa, 0.8, 0.5, 0.25, true, false, chassis);
+  addSuspension(P, ra, 0.78, 0.48, 0.24, false, false, chassis);
   // halo
   const haloCurve = new THREE.CatmullRomCurve3([
     new THREE.Vector3(-0.27, 0.66, -0.12), new THREE.Vector3(-0.29, 0.88, 0.1), new THREE.Vector3(-0.2, 0.95, 0.42),
@@ -497,7 +573,7 @@ function modernGeometry(P) {
 // 2005 car: high nose, narrow tall rear wing, beam wing, no halo
 function v10Geometry(P) {
   const fa = 1.55, ra = -1.55;
-  P.paint.push(loft([
+  const chassis = [
     { z: 2.36, w: 0.06, h: 0.05, y: 0.44, n: 2.4 },
     { z: 2.1, w: 0.11, h: 0.08, y: 0.47, n: 2.6 },
     { z: 1.7, w: 0.16, h: 0.12, y: 0.5, n: 2.8 },
@@ -510,7 +586,9 @@ function v10Geometry(P) {
     { z: -1.5, w: 0.17, h: 0.18, y: 0.44, n: 2.8 },
     { z: -1.95, w: 0.09, h: 0.11, y: 0.38, n: 2.6 },
     { z: -2.15, w: 0.02, h: 0.03, y: 0.35, n: 2.4 }
-  ]));
+  ];
+  P.paint.push(loft(chassis, 30, { z0: -0.17, z1: 0.4, halfW: 0.225, yMin: 0.6 }));
+  cockpit(P, { z0: -0.17, z1: 0.4, halfW: 0.225, floorY: 0.3, rimY: 0.715, wheel: { y: 0.68, z: 0.25 }, shoulderY: 0.64, shoulderZ: -0.1 });
   P.paint.push(loft([
     { z: -0.15, w: 0.13, h: 0.16, y: 0.86, n: 2.6 },
     { z: -0.45, w: 0.16, h: 0.2, y: 0.8, n: 2.6 },
@@ -535,7 +613,6 @@ function v10Geometry(P) {
     P.carbon.push(plate(0.5, 0.22, 0.01, s * 0.34, 0.08, 1.05, 0.1 * s, 0.4));
     P.carbon.push(new THREE.CylinderGeometry(0.045, 0.06, 0.14, 10).translate(s * 0.42, 0.62, -0.55));
   }
-  P.dark.push(loft([{ z: 0.42, w: 0.01, h: 0.01, y: 0.74 }, { z: 0.32, w: 0.19, h: 0.03, y: 0.735, n: 2.4 }, { z: -0.12, w: 0.23, h: 0.03, y: 0.75, n: 3 }, { z: -0.18, w: 0.01, h: 0.01, y: 0.76 }]));
   const fl = new THREE.Shape();
   [[0.32, 1.1], [0.72, 0.6], [0.76, -1.1], [0.5, -1.9], [-0.5, -1.9], [-0.76, -1.1], [-0.72, 0.6], [-0.32, 1.1]].forEach(([x, z], i) => fl[i ? 'lineTo' : 'moveTo'](x, -z));
   const floorG = new THREE.ExtrudeGeometry(fl, { depth: 0.03, bevelEnabled: false });
@@ -553,8 +630,8 @@ function v10Geometry(P) {
   P.carbon.push(wingElement(0.76, 0.2, 0.1, -2.12, 0.95, -26));
   P.carbon.push(wingElement(0.7, 0.18, 0.1, -1.85, 0.42, -10));
   for (const s of [1, -1]) P.paint.push(plate(0.6, 0.74, 0.014, s * 0.385, 0.34, -2.1, 0, 0.15));
-  addSuspension(P, fa, 0.74, 0.55, 0.26, true);
-  addSuspension(P, ra, 0.72, 0.48, 0.24, false);
+  addSuspension(P, fa, 0.74, 0.55, 0.26, true, false, chassis);
+  addSuspension(P, ra, 0.72, 0.48, 0.24, false, false, chassis);
   for (const s of [1, -1]) {
     P.paint.push(new THREE.BoxGeometry(0.12, 0.055, 0.04).translate(s * 0.44, 0.7, 0.35));
     P.carbon.push(strut([s * 0.28, 0.62, 0.38], [s * 0.42, 0.7, 0.35], 0.008, 2));
@@ -570,7 +647,7 @@ function v10Geometry(P) {
 // 1967 car: cigar body, exposed V8, no wings
 function classicGeometry(P) {
   const fa = 1.21, ra = -1.21;
-  P.paint.push(loft([
+  const chassis = [
     { z: 1.95, w: 0.13, h: 0.11, y: 0.36, n: 2 },
     { z: 1.8, w: 0.2, h: 0.17, y: 0.38, n: 2 },
     { z: 1.3, w: 0.27, h: 0.23, y: 0.42, n: 2.2 },
@@ -578,10 +655,11 @@ function classicGeometry(P) {
     { z: 0.0, w: 0.34, h: 0.28, y: 0.45, n: 2.4 },
     { z: -0.45, w: 0.33, h: 0.27, y: 0.44, n: 2.4 },
     { z: -0.75, w: 0.27, h: 0.18, y: 0.36, n: 2.4 }
-  ], 36));
+  ];
+  P.paint.push(loft(chassis, 36, { z0: -0.47, z1: 0.3, halfW: 0.24, yMin: 0.6 }));
+  cockpit(P, { z0: -0.47, z1: 0.3, halfW: 0.24, floorY: 0.28, rimY: 0.7, wheel: { y: 0.74, z: 0.12 }, shoulderY: 0.74, shoulderZ: -0.2 });
   P.dark.push(loft([{ z: 1.96, w: 0.1, h: 0.08, y: 0.36, n: 2 }, { z: 1.955, w: 0.095, h: 0.075, y: 0.36, n: 2 }]));
   // cockpit opening and windscreen
-  P.dark.push(loft([{ z: 0.35, w: 0.01, h: 0.01, y: 0.72 }, { z: 0.25, w: 0.22, h: 0.03, y: 0.715, n: 2.2 }, { z: -0.4, w: 0.25, h: 0.03, y: 0.72, n: 2.6 }, { z: -0.48, w: 0.01, h: 0.01, y: 0.72 }]));
   const screen = new THREE.CylinderGeometry(0.26, 0.26, 0.13, 18, 1, true, -1.2, 2.4);
   screen.rotateY(Math.PI / 2 + Math.PI);
   screen.translate(0, 0.79, 0.35);
@@ -598,8 +676,8 @@ function classicGeometry(P) {
   P.matt.push(new THREE.BoxGeometry(0.28, 0.24, 0.42).translate(0, 0.36, -1.55));
   // roll hoop
   P.metal.push(new THREE.TorusGeometry(0.17, 0.016, 6, 16, Math.PI).translate(0, 0.78, -0.42));
-  addSuspension(P, fa, 0.72, 0.48, 0.24, true, true);
-  addSuspension(P, ra, 0.72, 0.46, 0.22, false, true);
+  addSuspension(P, fa, 0.72, 0.48, 0.24, true, true, chassis);
+  addSuspension(P, ra, 0.72, 0.46, 0.22, false, true, chassis);
   for (const s of [1, -1]) P.metal.push(new THREE.BoxGeometry(0.08, 0.05, 0.03).translate(s * 0.33, 0.74, 0.32));
   return {
     wheels: [{ x: 0.72, z: fa, front: true }, { x: -0.72, z: fa, front: true }, { x: 0.72, z: ra, front: false }, { x: -0.72, z: ra, front: false }],
@@ -608,16 +686,21 @@ function classicGeometry(P) {
   };
 }
 
-function addSuspension(P, z, track, yUp, yLo, front, classic = false) {
+function addSuspension(P, z, track, yUp, yLo, front, classic = false, chassis = null) {
   const list = classic ? P.metal : P.carbon;
-  const inner = 0.2;
+  // inner pickups sit on the chassis skin, outer ends on an upright inside the wheel
+  const inX = (zz, y) => (chassis ? bodyHalfWidth(chassis, zz, y) - 0.004 : 0.2);
+  const yIn = yUp - 0.04, yInL = yLo + 0.03;
   for (const s of [1, -1]) {
-    const hub = s * (track - 0.06);
-    list.push(strut([s * inner, yUp, z + 0.18], [hub, yUp - 0.02, z], 0.012));
-    list.push(strut([s * inner, yUp, z - 0.18], [hub, yUp - 0.02, z], 0.012));
-    list.push(strut([s * inner * 0.9, yLo + 0.02, z + 0.24], [hub, yLo, z], 0.012));
-    list.push(strut([s * inner * 0.9, yLo + 0.02, z - 0.24], [hub, yLo, z], 0.012));
-    list.push(strut([s * inner, yLo + 0.05, z + (front ? 0.05 : -0.05)], [hub, yUp - 0.04, z], 0.01, 1.4));
+    const hub = s * (track - 0.09);
+    list.push(strut([s * inX(z + 0.18, yIn), yIn, z + 0.18], [hub, yUp - 0.02, z], 0.012));
+    list.push(strut([s * inX(z - 0.18, yIn), yIn, z - 0.18], [hub, yUp - 0.02, z], 0.012));
+    list.push(strut([s * inX(z + 0.24, yInL), yInL, z + 0.24], [hub, yLo, z], 0.012));
+    list.push(strut([s * inX(z - 0.24, yInL), yInL, z - 0.24], [hub, yLo, z], 0.012));
+    // push or pull rod to the rocker inside the body, and the steering arm at the front
+    const rz = z + (front ? -0.06 : 0.06);
+    list.push(strut([s * inX(rz, yUp - 0.02) * 0.9, yUp - 0.01, rz], [hub * 0.97, yLo + 0.03, z], 0.01, 1.4));
+    if (front) list.push(strut([s * inX(z + 0.1, (yUp + yLo) / 2), (yUp + yLo) / 2, z + 0.1], [hub, (yUp + yLo) / 2, z + 0.07], 0.009, 1.2));
     // upright
     P.matt.push(new THREE.BoxGeometry(0.06, yUp - yLo + 0.08, 0.1).translate(hub, (yUp + yLo) / 2, z));
   }
