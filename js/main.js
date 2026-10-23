@@ -1,0 +1,492 @@
+import * as THREE from 'three/webgpu';
+import { pass, uniform, Fn, vec3, vec4, float, dot, mix, max, pow, smoothstep, step, length, screenUV, screenSize, vec2, mrt, output, normalView } from 'three/tsl';
+import { bloom } from 'three/addons/tsl/display/BloomNode.js';
+import { ao } from 'three/addons/tsl/display/GTAONode.js';
+import { denoise } from 'three/addons/tsl/display/DenoiseNode.js';
+import { Track, BASE_ALT } from './track.js';
+import { Terrain } from './terrain.js';
+import { buildTrackMeshes } from './trackmesh.js';
+import { Atmosphere, PRESETS, PRESET_ORDER } from './sky.js';
+import { buildLake } from './water.js';
+import { buildScenery } from './scenery.js';
+import { buildVegetation } from './trees.js';
+import { buildCar } from './car-model.js';
+import { CARS } from './cars.js';
+import { Vehicle } from './vehicle.js';
+import { CameraRig, CAMERAS, placeTvCameras } from './cameras.js';
+import { Input } from './input.js';
+import { Sound } from './audio.js';
+import { Hud } from './hud.js';
+
+const $ = (id) => document.getElementById(id);
+const nextFrame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+const bootTimes = [];
+let bootLast = performance.now();
+const status = async (text, p) => {
+  const now = performance.now();
+  bootTimes.push(`${Math.round(now - bootLast)}ms`);
+  bootLast = now;
+  if (p === 1) console.info('[boot] stage times', bootTimes.join(' '));
+  $('intro-status-text').textContent = text;
+  $('intro-progress').style.width = `${Math.round(p * 100)}%`;
+  await nextFrame();
+};
+
+const app = {
+  mode: 'intro', autopilot: true, simTime: 0, carIndex: 0, startPhase: null, quality: 1,
+  pose: {
+    pos: new THREE.Vector3(), quat: new THREE.Quaternion(), matrix: new THREE.Matrix4(), forwardFlat: new THREE.Vector3(), velocity: new THREE.Vector3(), model: null
+  }
+};
+
+function drawIntroMap(track) {
+  const svg = $('intro-map');
+  let minX = 1e9, maxX = -1e9, minZ = 1e9, maxZ = -1e9;
+  for (let i = 0; i < track.M; i += 10) { minX = Math.min(minX, track.px[i]); maxX = Math.max(maxX, track.px[i]); minZ = Math.min(minZ, track.pz[i]); maxZ = Math.max(maxZ, track.pz[i]); }
+  const sc = 92 / Math.max(maxX - minX, maxZ - minZ);
+  let d = '';
+  for (let i = 0; i <= track.M; i += 12) {
+    const k = (Math.round(track.startLine) + i) % track.M;
+    const x = 50 + (track.px[k] - (minX + maxX) / 2) * sc, y = 50 + (track.pz[k] - (minZ + maxZ) / 2) * sc;
+    d += (i ? 'L' : 'M') + x.toFixed(2) + ' ' + y.toFixed(2);
+  }
+  svg.innerHTML = `<path class="base" d="${d}"/><path class="draw" d="${d}"/>`;
+  const p = svg.querySelector('.draw');
+  const len = p.getTotalLength();
+  p.style.strokeDasharray = len;
+  p.style.strokeDashoffset = len;
+  p.animate([{ strokeDashoffset: len }, { strokeDashoffset: 0 }], { duration: 3800, easing: 'cubic-bezier(.6,.05,.3,1)', fill: 'forwards' });
+}
+
+async function boot() {
+  if (!navigator.gpu) console.info('WebGPU not available: three.js falls back to WebGL 2');
+  const renderer = new THREE.WebGPURenderer({ antialias: false, reversedDepthBuffer: true, powerPreference: 'high-performance' });
+  await renderer.init();
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFShadowMap;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.0;
+  $('viewport').appendChild(renderer.domElement);
+  app.renderer = renderer;
+
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.12, 60000);
+  app.scene = scene; app.camera = camera;
+
+  await status('Tracing the circuit', 0.08);
+  const track = new Track();
+  app.track = track;
+  drawIntroMap(track);
+  const vehicle = new Vehicle(track, CARS[0]);
+  track.computeLayout(vehicle.profile.v);
+  app.vehicle = vehicle;
+
+  await status('Lighting the sky over Bugesera', 0.16);
+  const atmo = new Atmosphere(scene, renderer, camera);
+  app.atmo = atmo;
+
+  await status('Shaping the hills', 0.24);
+  const terrain = new Terrain(track);
+  app.terrain = terrain;
+  await status('Laying the terrain', 0.42);
+  scene.add(terrain.buildMeshes(atmo.U));
+  await status('Paving 6 km of asphalt', 0.5);
+  scene.add(buildTrackMeshes(track, atmo.U));
+  await status('Filling Lake Kidogo', 0.56);
+  scene.add(buildLake(atmo.U));
+  await status('Building the stands and paddock', 0.62);
+  const tvSpots = placeTvCameras(track, terrain);
+  const scenery = buildScenery(track, terrain, atmo.U, tvSpots);
+  scene.add(scenery.group);
+  app.startLights = scenery.startLights;
+  await status('Planting acacias and papyrus', 0.7);
+  const veg = buildVegetation(track, terrain, atmo.U, tvSpots);
+  scene.add(veg);
+  await status('Rolling out the car', 0.8);
+  setCar(0, true);
+
+  // camera, input, sound, HUD
+  app.rig = new CameraRig(camera, renderer.domElement, track, terrain);
+  app.rig.cinematic = true;
+  app.input = new Input();
+  app.input.bindTouch($('touch'));
+  app.input.onKey = onKey;
+  app.sound = new Sound();
+  app.hud = new Hud(track);
+  app.hud.setCar(CARS[app.carIndex]);
+  buildCarPicker();
+  wireUi();
+
+  // post-processing: bloom and a gentle grade
+  await status('Compiling shaders', 0.86);
+  const pipeline = new THREE.RenderPipeline(renderer);
+  const scenePass = pass(scene, camera, { samples: 4 });
+  const color = scenePass.getTextureNode('output');
+  // ambient occlusion from a cheap half-size depth and normal pass without foliage, fences, water or sky
+  const prePass = pass(scene, camera, { samples: 0 });
+  prePass.setResolutionScale(0.5);
+  prePass.setMRT(mrt({ output: normalView }));
+  prePass.overrideMaterial = new THREE.MeshBasicNodeMaterial();
+  const skip = [];
+  scene.traverse((o) => { if (o.isMesh && (/^trees-|track-fence|^lake$/.test(o.name) || o.isSkyMesh || o === atmo.sky)) skip.push(o); });
+  skip.push(atmo.sky);
+  const preUpdate = prePass.updateBefore.bind(prePass);
+  prePass.updateBefore = (frame) => {
+    for (const o of skip) o.visible = false;
+    const r = preUpdate(frame);
+    for (const o of skip) o.visible = true;
+    return r;
+  };
+  const aoPass = ao(prePass.getTextureNode('depth'), prePass.getTextureNode(), camera);
+  aoPass.resolutionScale = 1;
+  aoPass.radius.value = 1.1;
+  aoPass.samples.value = 10;
+  aoPass.distanceExponent.value = 1.4;
+  const aoTex = denoise(aoPass.getTextureNode(), prePass.getTextureNode('depth'), prePass.getTextureNode(), camera);
+  const bloomPass = bloom(color, 0.16, 0.45, 0.95);
+  app.bloom = bloomPass;
+  const vignette = uniform(0.22);
+  app.aoStrength = uniform(0.75);
+  const preDepth = prePass.getTextureNode('depth');
+  const grade = (withAO) => Fn(() => {
+    // the sky and other skipped surfaces leave the cleared depth behind: no occlusion there
+    const dz = preDepth.r;
+    const drawn = renderer.reversedDepthBuffer ? step(0.0000001, dz) : step(dz, 0.9999999);
+    const occl = withAO ? mix(float(1), aoTex.r, app.aoStrength.mul(drawn)) : float(1);
+    const c = color.rgb.mul(occl).add(bloomPass.rgb).toVar();
+    const luma = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    c.assign(mix(vec3(luma), c, 1.08));
+    const aspect = screenSize.x.div(screenSize.y);
+    const r = length(screenUV.sub(0.5).mul(vec2(aspect, 1))).div(length(vec2(aspect, 1).mul(0.5)));
+    return vec4(c.mul(float(1).sub(smoothstep(0.45, 1.05, r).mul(vignette))), 1);
+  })();
+  app.outputs = { withAO: grade(true), plain: grade(false) };
+  pipeline.outputNode = app.outputs.withAO;
+  app.aoOn = true;
+  app.pipeline = pipeline;
+
+  // first pose and camera so compilation sees the real scene
+  vehicle.reset(track.wrap(track.startLine - 600), 0);
+  vehicle.v = vehicle.profile.v[Math.floor(vehicle.s / track.lineStep)];
+  updatePose(0);
+  app.rig.update(0.016, app.pose, vehicle);
+  atmo.update(0.016, app.pose.pos);
+  try { await renderer.compileAsync(scene, camera); } catch (err) { console.warn('compileAsync', err); }
+  await status('Ready', 1);
+  $('intro-status').hidden = true;
+  $('intro-actions').hidden = false;
+  $('btn-drive').focus({ preventScroll: true });
+
+  window.addEventListener('resize', onResize);
+  let last = performance.now();
+  renderer.setAnimationLoop(() => {
+    const now = performance.now();
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    frame(dt);
+  });
+}
+
+function setCar(i, first = false) {
+  app.carIndex = i;
+  const car = CARS[i];
+  if (app.carModel) {
+    app.scene.remove(app.carModel);
+    app.carModel.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); } });
+  }
+  app.carModel = buildCar(car);
+  app.scene.add(app.carModel);
+  app.pose.model = app.carModel;
+  if (!first) {
+    const keep = { s: app.vehicle.s, d: app.vehicle.d, v: app.vehicle.v };
+    app.vehicle.setCar(car);
+    Object.assign(app.vehicle, keep);
+    app.vehicle.gear = 0;
+    app.sound.setCar(car);
+    app.hud.setCar(car);
+    document.querySelectorAll('.car-card').forEach((c, k) => c.classList.toggle('active', k === i));
+  } else {
+    app.vehicle.setCar(car);
+  }
+}
+
+function buildCarPicker() {
+  const list = $('car-list');
+  list.innerHTML = '';
+  CARS.forEach((car, i) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'car-card' + (i === app.carIndex ? ' active' : '');
+    const L = car.livery;
+    b.innerHTML = `<span class="swatch" style="background:linear-gradient(115deg, ${L.base} 0 52%, ${L.accent} 52% 70%, ${L.third} 70%)"></span>
+      <span class="era">${car.eraLabel}</span><strong>${car.name}</strong><span class="spec">${car.specLine}<br>${car.blurb}</span>`;
+    b.addEventListener('click', () => { setCar(i); $('car-picker').hidePopover?.(); });
+    list.appendChild(b);
+  });
+}
+
+function setTime(id) {
+  app.atmo.set(id);
+  document.querySelectorAll('.seg-btn').forEach((b) => b.classList.toggle('active', b.dataset.time === id));
+  const p = PRESETS[id];
+  app.bloom.strength.value = p.bloom;
+}
+
+function setAutopilot(on) {
+  app.autopilot = on;
+  $('btn-auto').setAttribute('aria-pressed', String(on));
+}
+
+function wireUi() {
+  $('btn-drive').addEventListener('click', () => start(false));
+  $('btn-hotlap').addEventListener('click', () => start(true));
+  document.querySelectorAll('.seg-btn').forEach((b) => b.addEventListener('click', () => setTime(b.dataset.time)));
+  $('btn-auto').addEventListener('click', () => setAutopilot(!app.autopilot));
+  $('btn-sound').addEventListener('click', toggleSound);
+  $('btn-hide').addEventListener('click', () => $('hud').classList.toggle('clean'));
+  $('btn-full').addEventListener('click', toggleFull);
+  $('cam-prev').addEventListener('click', () => app.rig.next(-1));
+  $('cam-next').addEventListener('click', () => app.rig.next(1));
+  $('cam-name').addEventListener('click', () => app.rig.next(1));
+  // buttons must not keep focus, or Space presses them again
+  document.addEventListener('pointerup', (e) => { const b = e.target.closest('button'); if (b) b.blur(); });
+  if (matchMedia('(pointer: coarse)').matches) { $('touch').hidden = false; document.body.classList.add('touch-ui'); }
+}
+
+function toggleSound() {
+  const on = !app.sound.enabled;
+  app.sound.setEnabled(on);
+  $('btn-sound').setAttribute('aria-pressed', String(on));
+}
+
+function toggleFull() {
+  if (document.fullscreenElement) document.exitFullscreen?.();
+  else document.documentElement.requestFullscreen?.().catch(() => {});
+}
+
+async function start(hotlap) {
+  try {
+    await app.sound.init();
+    app.sound.setCar(CARS[app.carIndex]);
+    app.sound.resume();
+  } catch (err) { console.warn('Audio unavailable', err); }
+  $('intro').classList.add('gone');
+  $('hud').hidden = false;
+  app.rig.cinematic = false;
+  app.mode = 'drive';
+  app.hud.resetLap();
+  if (hotlap) {
+    app.rig.set(1);
+    const s = app.track.wrap(app.track.startLine - 450);
+    app.vehicle.reset(s, app.track.lineOffset(s));
+    app.vehicle.v = app.vehicle.profile.v[Math.floor(s / app.track.lineStep)];
+    setAutopilot(true);
+    app.startPhase = null;
+  } else {
+    app.rig.set(0);
+    app.vehicle.reset(app.track.wrap(app.track.startLine - 9), 2.6);
+    setAutopilot(false);
+    beginStartLights();
+  }
+  app.hud.hint('<kbd>W</kbd> throttle · <kbd>S</kbd> brake · <kbd>A</kbd><kbd>D</kbd> steer · <kbd>V</kbd> camera · <kbd>P</kbd> hot lap · <kbd>T</kbd> time of day');
+  setTimeout(() => app.hud.hint(''), 9000);
+}
+
+function beginStartLights() {
+  app.startPhase = { t: 0, out: 3.2 + 0.6 + Math.random() * 1.6 };
+  $('start-lights').hidden = false;
+}
+
+function updateStartLights(dt) {
+  const sp = app.startPhase;
+  if (!sp) return;
+  sp.t += dt;
+  const lit = Math.min(5, Math.floor(sp.t / 0.8) + 1);
+  const out = sp.t >= sp.out;
+  const spans = $('start-lights').children;
+  for (let i = 0; i < 5; i++) {
+    const on = !out && i < lit;
+    spans[i].classList.toggle('on', on);
+    app.startLights[i].value = on ? 1 : 0;
+  }
+  if (out) {
+    app.startPhase = null;
+    setTimeout(() => { $('start-lights').hidden = true; }, 900);
+  }
+}
+
+function onKey(e) {
+  if (app.mode !== 'drive') return;
+  switch (e.code) {
+    case 'KeyV': app.rig.next(1); break;
+    case 'Digit1': case 'Digit2': case 'Digit3': case 'Digit4': case 'Digit5': case 'Digit6':
+      app.rig.set(Number(e.code.slice(5)) - 1); break;
+    case 'KeyP': setAutopilot(!app.autopilot); break;
+    case 'KeyR': {
+      const v = app.vehicle;
+      v.reset(v.s, 0);
+      break;
+    }
+    case 'KeyT': {
+      const i = PRESET_ORDER.indexOf(app.atmo.id);
+      setTime(PRESET_ORDER[(i + 1) % PRESET_ORDER.length]);
+      break;
+    }
+    case 'KeyN': toggleSound(); break;
+    case 'KeyH': $('hud').classList.toggle('clean'); break;
+    case 'KeyF': toggleFull(); break;
+    default: break;
+  }
+}
+
+function onResize() {
+  const w = window.innerWidth, h = window.innerHeight;
+  app.camera.aspect = w / h;
+  app.camera.updateProjectionMatrix();
+  app.renderer.setSize(w, h);
+}
+
+const _f = {}, _T = new THREE.Vector3(), _L = new THREE.Vector3(), _N = new THREE.Vector3(), _F = new THREE.Vector3(), _X = new THREE.Vector3(), _basis = new THREE.Matrix4();
+const _rollQ = new THREE.Quaternion(), _e = new THREE.Euler();
+
+function updatePose(dt) {
+  const v = app.vehicle, tr = app.track, pose = app.pose;
+  const f = tr.frame(v.s, _f);
+  const thetaC = f.theta - v.psi;
+  const fx = Math.cos(thetaC), fz = Math.sin(thetaC);
+  const prev = pose.pos.clone();
+  const kerbLift = v.kerb ? 0.035 + Math.abs(Math.sin(v.s * Math.PI)) * 0.012 : 0;
+  const y = tr.heightAt(v.s, v.d, f) + kerbLift + (v.surface === 'grass' ? Math.sin(v.s * 1.7) * 0.02 : 0);
+  pose.pos.set(f.x + f.lx * v.d, y, f.z + f.lz * v.d);
+  if (dt > 0) pose.velocity.copy(pose.pos).sub(prev).divideScalar(dt);
+  // road plane from grade and banking
+  const bank = Math.abs(v.d) <= f.half ? f.bank : -0.02 * Math.sign(v.d);
+  _T.set(f.tx, f.grade, f.tz).normalize();
+  _L.set(f.lx, bank, f.lz).normalize();
+  _N.crossVectors(_T, _L).normalize();
+  _F.set(fx, -(_N.x * fx + _N.z * fz) / _N.y, fz).normalize();
+  _X.crossVectors(_N, _F).normalize();
+  _basis.makeBasis(_X, _N, _F);
+  pose.quat.setFromRotationMatrix(_basis);
+  // body roll and pitch from the loads
+  const roll = THREE.MathUtils.clamp(v.latAcc * 0.0016, -0.06, 0.06);
+  const pitch = THREE.MathUtils.clamp(-v.lonAcc * 0.0009, -0.05, 0.05);
+  _rollQ.setFromEuler(_e.set(pitch, 0, roll));
+  pose.quat.multiply(_rollQ);
+  pose.forwardFlat.set(fx, 0, fz);
+  pose.matrix.compose(pose.pos, pose.quat, new THREE.Vector3(1, 1, 1));
+  const m = app.carModel;
+  m.position.copy(pose.pos);
+  m.quaternion.copy(pose.quat);
+  // wheels, steering, active aero, rain light
+  const ud = m.userData;
+  const car = CARS[app.carIndex];
+  const spin = (v.v / car.wheelRadius) * dt;
+  for (const w of ud.wheels) {
+    w.spin.rotation.x += spin;
+    if (w.front) w.steer.rotation.y = v.steer * 0.3;
+  }
+  if (ud.flap) ud.flap.rotation.x += ((v.straightMode ? -0.42 : 0) - ud.flap.rotation.x) * Math.min(1, dt * 10);
+  const blink = Math.floor(performance.now() / 120) % 2;
+  ud.rainOn.value = (car.engine.hybrid && v.brake > 0.1 && blink) || app.atmo.U.night.value > 0.5 ? 1 : 0.0;
+  ud.steeringWheel.group.rotation.z = v.steer * 1.1;
+  const rimMat = ud.wheels[0].spin.children[1].material;
+  if (rimMat.userData.speed) rimMat.userData.speed.value = Math.abs(v.v);
+}
+
+function listenerFor() {
+  const cam = app.camera, pose = app.pose;
+  const id = app.rig.activeId;
+  const onboard = id === 'tcam' || id === 'cockpit' || id === 'nose';
+  const toCar = pose.pos.clone().sub(cam.position);
+  const dist = toCar.length();
+  // Doppler: source speed along the line to the listener
+  const dir = toCar.clone().normalize();
+  const vr = -pose.velocity.dot(dir);
+  const doppler = onboard ? 1 : THREE.MathUtils.clamp(343 / (343 - vr), 0.55, 1.8);
+  const right = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
+  const pan = onboard ? 0 : THREE.MathUtils.clamp(dir.dot(right) * 0.8, -0.8, 0.8);
+  return { onboard, dist: onboard ? 0 : dist, doppler, pan };
+}
+
+function frame(dt) {
+  const v = app.vehicle;
+  app.simTime += dt;
+  const inp = app.input.poll();
+  if (app.mode === 'drive') {
+    if (app.autopilot && inp.active && !app.startPhase) setAutopilot(false);
+    updateStartLights(dt);
+    if (app.autopilot) v.autopilot(dt);
+    else {
+      const hold = !!app.startPhase;
+      v.step(dt, hold ? { ...inp, brake: 1, steer: 0 } : inp);
+      if (hold) { v.v = 0; v.gear = 0; v.rpm = Math.max(v.rpm, v.car.engine.idle + inp.throttle * (v.car.engine.shift * 0.75 - v.car.engine.idle)); }
+    }
+  } else {
+    v.autopilot(dt);
+  }
+  const crossed = v.crossedLine;
+  v.crossedLine = false;
+  updatePose(dt);
+  if (app.freeCam) {
+    app.camera.position.copy(app.freeCam.pos);
+    app.camera.lookAt(app.freeCam.target);
+    if (app.freeCam.fov && app.camera.fov !== app.freeCam.fov) { app.camera.fov = app.freeCam.fov; app.camera.updateProjectionMatrix(); }
+    app.rig.activeId = 'free';
+  } else app.rig.update(dt, app.pose, v);
+  app.atmo.update(dt, app.pose.pos);
+  if (app.mode === 'drive') {
+    app.hud.timing(app.simTime, v, crossed);
+    let mode = app.autopilot ? 'Hot lap' : '';
+    if (v.straightMode && !mode) mode = 'Straight-line mode';
+    if (v.boost && !mode) mode = 'Boost';
+    app.hud.update(v, CARS[app.carIndex], app.rig.label, mode);
+    const ud = app.carModel.userData;
+    if (app.rig.activeId === 'cockpit' && (app.hud.frame % 3 === 0)) {
+      const car = CARS[app.carIndex];
+      ud.steeringWheel.draw(String(v.gear + 1), Math.round(Math.abs(v.v) * 3.6), Math.max(0, Math.min(1, (v.rpm - car.engine.shift * 0.62) / (car.engine.shift * 0.38))));
+    }
+  }
+  // the car mesh hides when the camera sits inside it
+  app.carModel.visible = true;
+  if (app.sound.ready) {
+    const L = listenerFor();
+    const tr = app.track;
+    const fromLine = tr.wrap(v.s - tr.startLine + 300);
+    const crowd = fromLine < 700 ? 1 : 0.15;
+    const lake = Math.max(0, 1 - Math.max(0, app.terrain.infoAt(app.camera.position.x, app.camera.position.z).lake) / 300);
+    app.sound.update(v, L, { night: app.atmo.U.night.value, crowd, lake });
+  }
+  adaptQuality(dt);
+  app.pipeline.render();
+}
+
+// Step quality down when frames stay slow: first ambient occlusion, then resolution. Up again when there is headroom.
+const perf = { ema: 1 / 60, slowFor: 0, fastFor: 0, grace: 6 };
+function adaptQuality(dt) {
+  perf.grace -= dt;
+  perf.ema += (dt - perf.ema) * Math.min(1, dt * 1.5);
+  if (perf.grace > 0) return;
+  perf.slowFor = perf.ema > 1 / 38 ? perf.slowFor + dt : 0;
+  perf.fastFor = perf.ema < 1 / 75 ? perf.fastFor + dt : 0;
+  const r = app.renderer, maxPR = Math.min(window.devicePixelRatio, 1.5);
+  if (perf.slowFor > 4) {
+    perf.slowFor = 0; perf.grace = 3;
+    if (app.aoOn) { app.aoOn = false; app.pipeline.outputNode = app.outputs.plain; app.pipeline.needsUpdate = true; }
+    else if (r.getPixelRatio() > 0.6) r.setPixelRatio(Math.max(0.6, r.getPixelRatio() * 0.8));
+  } else if (perf.fastFor > 8) {
+    perf.fastFor = 0; perf.grace = 3;
+    if (r.getPixelRatio() < maxPR) r.setPixelRatio(Math.min(maxPR, r.getPixelRatio() * 1.15));
+    else if (!app.aoOn) { app.aoOn = true; app.pipeline.outputNode = app.outputs.withAO; app.pipeline.needsUpdate = true; }
+  }
+}
+
+boot().catch((err) => {
+  console.error(err);
+  $('intro-status-text').textContent = 'This browser could not start the 3D view: ' + (err && err.message ? err.message : err);
+});
+
+// debugging handle
+window.__rise = app;
