@@ -120,7 +120,7 @@ async function boot() {
   wireUi();
 
   // post-processing: bloom and a gentle grade
-  await status('Compiling shaders', 0.86);
+  await status('Preparing the graphics: up to 20 s on a first visit', 0.86);
   const pipeline = new THREE.RenderPipeline(renderer);
   const scenePass = pass(scene, camera, { samples: 4 });
   const color = scenePass.getTextureNode('output');
