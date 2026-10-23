@@ -36,9 +36,27 @@ function windowMax(src, behind, ahead) {
   return out;
 }
 
+// The same circuit driven clockwise: points in reverse order, banking and turn directions flipped
+export function reversedData(src = TRACK) {
+  const n = src.x.length, L = src.length;
+  const rev = (arr, sign = 1) => arr.map((_, k) => arr[(n - k) % n] * sign);
+  const corners = src.corners.map((c) => {
+    const nick = c.name.replace(/^Turn \d+ ?·? ?/, '').replace('Final hairpin', 'Hairpin');
+    const num = src.corners.length + 1 - c.n;
+    return { n: num, s: (L - c.s) % L, dir: c.dir === 'L' ? 'R' : 'L', name: `Turn ${num}` + (nick ? ` · ${nick}` : '') };
+  }).sort((a, b) => a.n - b.n);
+  return {
+    length: L, step: src.step,
+    x: rev(src.x), z: rev(src.z), y: rev(src.y), bank: rev(src.bank, -1), width: rev(src.width),
+    corners, sectors: [0, (L - src.sectors[2]) % L, (L - src.sectors[1]) % L], startLine: (L - src.startLine) % L,
+    reversed: true
+  };
+}
+
 export class Track {
-  constructor() {
-    const c = TRACK;
+  constructor(data = TRACK) {
+    const c = data;
+    this.reversed = !!c.reversed;
     this.length = c.length;
     this.corners = c.corners;
     this.sectors = c.sectors;
@@ -298,6 +316,19 @@ export class Track {
     }
     this._pitWall();
   }
+
+  // Kerbs, run-off and walls are physical: a reversed track takes them from the forward one, mirrored
+  copyLayoutFrom(fwd) {
+    const M = this.M;
+    const map = (src) => { const out = new Float32Array(M); for (let i = 0; i < M; i++) out[i] = src[(M - i) % M]; return out; };
+    this.wallL = map(fwd.wallR); this.wallR = map(fwd.wallL);
+    this.kerbL = map(fwd.kerbR); this.kerbR = map(fwd.kerbL);
+    this.runL = map(fwd.runR); this.runR = map(fwd.runL);
+    this.pitStart = this.wrap(this.length - fwd.pitEnd); this.pitEnd = this.wrap(this.length - fwd.pitStart);
+  }
+
+  // Distance along the forward (anticlockwise) lap for a distance on this track
+  forwardS(s) { return this.reversed ? this.wrap(this.length - s) : s; }
 
   // The pit wall sits on the left of the main straight.
   _pitWall() {

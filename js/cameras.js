@@ -106,11 +106,14 @@ export class CameraRig {
     }, { passive: false });
   }
 
-  _pickTv(s) {
+  // Cameras sit at fixed spots on the forward lap; pick the next one in the direction of travel
+  _pickTv(veh) {
     const tr = this.track;
+    const vt = veh.track;
+    const sF = vt.forwardS(veh.s), dir = vt.reversed ? -1 : 1;
     let best = 0, bestDs = Infinity;
     this.tvCams.forEach((c, i) => {
-      const ds = tr.wrap(c.s - s + 90);
+      const ds = dir > 0 ? tr.wrap(c.s - sF + 90) : tr.wrap(sF - c.s + 90);
       if (ds < bestDs) { bestDs = ds; best = i; }
     });
     return best;
@@ -170,7 +173,7 @@ export class CameraRig {
       fov += Math.min(8, speed * 0.06);
       fov /= Math.sqrt(this.zoom);
     } else if (id === 'tv') {
-      const idx = this._pickTv(veh.s);
+      const idx = this._pickTv(veh);
       const c = this.tvCams[idx];
       if (idx !== this.tvIndex) { this.tvIndex = idx; this.smoothLook.copy(pose.pos); }
       cam.position.copy(c.pos);

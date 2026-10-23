@@ -35,7 +35,8 @@ All paths are relative, so it works from a sub-path. The `.nojekyll` file stops 
 | `P` | Hot lap autopilot on or off (any pedal or steering input takes over) |
 | `R` | Back on track |
 | `T` | Time of day: dawn, day, sunset, floodlit night |
-| `N` / `H` / `F` | Sound, HUD, full screen |
+| `C` | Reverse: run the lap clockwise (also on the title screen and the toolbar) |
+| `N` / `H` / `F` | Sound, HUD (the eye button top right brings it back), full screen |
 | Mouse drag / scroll | Look around / zoom |
 
 Gamepads work (right trigger throttle, left trigger brake, left stick steer, Y camera, X hot lap). Phones get an on-screen steering pad and pedals.
@@ -48,7 +49,7 @@ Gamepads work (right trigger throttle, left trigger brake, left stick steer, Y c
 | Scream | 2005 | 3.0 V10, 19,000 rpm | 640 kg |
 | Heritage | 1967 | 3.0 V8, no wings | 560 kg |
 
-Air density is set for 1,390 m above sea level (about 86% of sea level), which cuts both drag and downforce. The 2026 car runs about 1:43 on the hot lap.
+Air density is set for 1,390 m above sea level (about 86% of sea level), which cuts both drag and downforce. The 2026 car runs about 1:43 on the hot lap in either direction. Reverse keeps a separate best lap.
 
 ## How the circuit was built
 

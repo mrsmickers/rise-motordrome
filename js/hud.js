@@ -10,7 +10,6 @@ const nf = new Intl.NumberFormat('en-GB');
 
 export class Hud {
   constructor(track) {
-    this.track = track;
     this.el = {
       root: $('hud'), lap: $('hud-lap'), last: $('hud-last'), best: $('hud-best'), s: [$('hud-s1'), $('hud-s2'), $('hud-s3')],
       speed: $('hud-speed'), gear: $('hud-gear'), rpm: $('hud-rpm'), thr: $('hud-thr'), brk: $('hud-brk'),
@@ -22,8 +21,7 @@ export class Hud {
     this.map = $('map-canvas'); this.mapCtx = this.map.getContext('2d');
     this.prof = $('profile-canvas'); this.profCtx = this.prof.getContext('2d');
     this.g = $('g-canvas'); this.gCtx = this.g.getContext('2d');
-    this._prepareMap();
-    this._prepareProfile();
+    this.setTrack(track);
     this.lapStart = null;
     this.sectorStart = null;
     this.sector = 0;
@@ -34,10 +32,20 @@ export class Hud {
     this.frame = 0;
   }
 
+  setTrack(track) {
+    this.track = track;
+    this._prepareMap();
+    this._prepareProfile();
+    if (this.car) this.setCar(this.car);
+  }
+
+  get bestKey() { return 'rise-best-' + this.carId + (this.track.reversed ? '-reverse' : ''); }
+
   setCar(car) {
+    this.car = car;
     this.carId = car.id;
-    this.el.car.textContent = `${car.eraLabel} · ${car.name}`;
-    try { this.best = Number(localStorage.getItem('rise-best-' + car.id)) || Infinity; } catch { this.best = Infinity; }
+    this.el.car.textContent = `${car.eraLabel} · ${car.name}` + (this.track.reversed ? ' · reverse' : '');
+    try { this.best = Number(localStorage.getItem(this.bestKey)) || Infinity; } catch { this.best = Infinity; }
     this.el.best.textContent = fmt(this.best);
     this.resetLap();
   }
@@ -121,7 +129,7 @@ export class Hud {
         if (lap < this.best) {
           this.best = lap;
           this.el.best.textContent = fmt(lap);
-          try { localStorage.setItem('rise-best-' + this.carId, String(lap)); } catch { /* storage may be blocked */ }
+          try { localStorage.setItem(this.bestKey, String(lap)); } catch { /* storage may be blocked */ }
         }
       }
       this.lapStart = now; this.sectorStart = now; this.sector = 0;

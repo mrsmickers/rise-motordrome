@@ -3,7 +3,7 @@ import { pass, uniform, Fn, vec3, vec4, float, dot, mix, max, pow, smoothstep, s
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { ao } from 'three/addons/tsl/display/GTAONode.js';
 import { denoise } from 'three/addons/tsl/display/DenoiseNode.js';
-import { Track, BASE_ALT } from './track.js';
+import { Track, BASE_ALT, reversedData } from './track.js';
 import { Terrain } from './terrain.js';
 import { buildTrackMeshes } from './trackmesh.js';
 import { Atmosphere, PRESETS, PRESET_ORDER } from './sky.js';
@@ -78,6 +78,8 @@ async function boot() {
   await status('Tracing the circuit', 0.08);
   const track = new Track();
   app.track = track;
+  app.trackFwd = track;
+  app.reverse = false;
   drawIntroMap(track);
   const vehicle = new Vehicle(track, CARS[0]);
   track.computeLayout(vehicle.profile.v);
@@ -244,8 +246,11 @@ function wireUi() {
   $('btn-hotlap').addEventListener('click', () => start(true));
   document.querySelectorAll('.seg-btn').forEach((b) => b.addEventListener('click', () => setTime(b.dataset.time)));
   $('btn-auto').addEventListener('click', () => setAutopilot(!app.autopilot));
+  $('btn-reverse').addEventListener('click', () => setDirection(!app.reverse, true));
+  document.querySelectorAll('.dir-btn').forEach((b) => b.addEventListener('click', () => setDirection(b.dataset.dir === '1', false)));
+  $('btn-show').addEventListener('click', () => toggleHud(false));
   $('btn-sound').addEventListener('click', toggleSound);
-  $('btn-hide').addEventListener('click', () => $('hud').classList.toggle('clean'));
+  $('btn-hide').addEventListener('click', () => toggleHud(true));
   $('btn-full').addEventListener('click', toggleFull);
   $('cam-prev').addEventListener('click', () => app.rig.next(-1));
   $('cam-next').addEventListener('click', () => app.rig.next(1));
@@ -253,6 +258,49 @@ function wireUi() {
   // buttons must not keep focus, or Space presses them again
   document.addEventListener('pointerup', (e) => { const b = e.target.closest('button'); if (b) b.blur(); });
   if (matchMedia('(pointer: coarse)').matches) { $('touch').hidden = false; document.body.classList.add('touch-ui'); }
+}
+
+function toggleHud(hide) {
+  $('hud').classList.toggle('clean', hide);
+  if (!hide) $('btn-hide').focus({ preventScroll: true });
+}
+
+// Anticlockwise is the official direction; reverse runs the same road clockwise
+function setDirection(rev, restart) {
+  if (rev && !app.trackRev) {
+    app.trackRev = new Track(reversedData());
+    app.trackRev.copyLayoutFrom(app.trackFwd);
+  }
+  if (app.reverse !== rev) {
+    const v = app.vehicle;
+    const sF = app.track.forwardS(v.s), d = v.d;
+    app.reverse = rev;
+    app.track = rev ? app.trackRev : app.trackFwd;
+    v.track = app.track;
+    v.setCar(CARS[app.carIndex]);
+    // same spot on the road, now facing the other way
+    v.reset(rev ? app.track.wrap(app.track.length - sF) : sF, -d);
+    app.hud.setTrack(app.track);
+  }
+  document.querySelectorAll('.dir-btn').forEach((b) => { const on = (b.dataset.dir === '1') === rev; b.classList.toggle('active', on); b.setAttribute('aria-pressed', String(on)); });
+  $('btn-reverse').setAttribute('aria-pressed', String(rev));
+  if (restart && app.mode === 'drive') restartRun(app.autopilot);
+}
+
+// Back to the grid (or onto a flying lap) for the current direction
+function restartRun(hotlap) {
+  const tr = app.track, v = app.vehicle;
+  app.hud.resetLap();
+  if (hotlap) {
+    const s = tr.wrap(tr.startLine - 450);
+    v.reset(s, tr.lineOffset(s));
+    v.v = v.profile.v[Math.floor(s / tr.lineStep) % v.profile.v.length];
+    app.startPhase = null;
+    $('start-lights').hidden = true;
+  } else {
+    v.reset(tr.wrap(tr.startLine - 9), 2.6);
+    beginStartLights();
+  }
 }
 
 function toggleSound() {
@@ -277,19 +325,9 @@ async function start(hotlap) {
   app.rig.cinematic = false;
   app.mode = 'drive';
   app.hud.resetLap();
-  if (hotlap) {
-    app.rig.set(1);
-    const s = app.track.wrap(app.track.startLine - 450);
-    app.vehicle.reset(s, app.track.lineOffset(s));
-    app.vehicle.v = app.vehicle.profile.v[Math.floor(s / app.track.lineStep)];
-    setAutopilot(true);
-    app.startPhase = null;
-  } else {
-    app.rig.set(0);
-    app.vehicle.reset(app.track.wrap(app.track.startLine - 9), 2.6);
-    setAutopilot(false);
-    beginStartLights();
-  }
+  app.rig.set(hotlap ? 1 : 0);
+  setAutopilot(hotlap);
+  restartRun(hotlap);
   app.hud.hint('<kbd>W</kbd> throttle · <kbd>S</kbd> brake · <kbd>A</kbd><kbd>D</kbd> steer · <kbd>V</kbd> camera · <kbd>P</kbd> hot lap · <kbd>T</kbd> time of day');
   setTimeout(() => app.hud.hint(''), 9000);
 }
@@ -335,7 +373,8 @@ function onKey(e) {
       break;
     }
     case 'KeyN': toggleSound(); break;
-    case 'KeyH': $('hud').classList.toggle('clean'); break;
+    case 'KeyH': toggleHud(!$('hud').classList.contains('clean')); break;
+    case 'KeyC': setDirection(!app.reverse, true); break;
     case 'KeyF': toggleFull(); break;
     default: break;
   }

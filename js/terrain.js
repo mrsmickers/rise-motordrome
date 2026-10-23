@@ -176,9 +176,12 @@ export class Terrain {
           let hh = a.h;
           dist = a.out;
           if (best2[id] < 1e9) {
+            // two parts of the lap nearby: the closer one owns the ground, so a section never lifts
+            // the ground through another section's road; halfway between them the weights meet
             const b = target(s2[id], x, z);
             const c2 = 1 - sstep(2, BLEND, b.out);
-            if (c1 + c2 > 0) hh = (a.h * c1 + b.h * c2) / (c1 + c2);
+            const w1 = c1 * Math.exp(-a.out / 10), w2 = c2 * Math.exp(-b.out / 10);
+            if (w1 + w2 > 1e-9) hh = (a.h * w1 + b.h * w2) / (w1 + w2);
             c1 = Math.max(c1, c2);
             dist = Math.min(dist, b.out);
           }
@@ -225,6 +228,25 @@ export class Terrain {
     return fu + fv < 1 ? a + (b - a) * fu + (c - a) * fv : d + (c - d) * (1 - fu) + (b - d) * (1 - fv);
   }
 
+  // Lowest detailed ground within a square of half-size r around (x, z)
+  lowestNear(x, z, r) {
+    const { n, step, half, H } = this.near;
+    const i0 = Math.max(0, Math.floor((x - r + half) / step)), i1 = Math.min(n - 1, Math.ceil((x + r + half) / step));
+    const j0 = Math.max(0, Math.floor((z - r + half) / step)), j1 = Math.min(n - 1, Math.ceil((z + r + half) / step));
+    let lo = Infinity;
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) { const h = H[j * n + i]; if (h < lo) lo = h; }
+    return lo === Infinity ? this.natural(x, z) : lo;
+  }
+
+  // Height of the far mesh surface, matching its triangles
+  farHeightAt(x, z) {
+    const { n, step, half, H } = this.far;
+    const u = (x + half) / step, v = (z + half) / step;
+    const i = Math.floor(u), j = Math.floor(v), fu = u - i, fv = v - j;
+    const a = H[j * n + i], b = H[j * n + i + 1], c = H[(j + 1) * n + i], d = H[(j + 1) * n + i + 1];
+    return fu + fv < 1 ? a + (b - a) * fu + (c - a) * fv : d + (c - d) * (1 - fu) + (b - d) * (1 - fv);
+  }
+
   infoAt(x, z) {
     const { n, step, half, info } = this.near;
     const i = Math.round((x + half) / step), j = Math.round((z + half) / step);
@@ -246,19 +268,24 @@ export class Terrain {
       mesh.name = 'terrain-near';
       group.add(mesh);
     }
-    // far ring, sunk under the near patch
+    // far ring. Inside the near patch its big triangles must stay under every dip of the detailed
+    // ground they span, so each such vertex sits below the lowest near ground within one far cell.
     {
       const { size, step } = FAR;
       const n = Math.round(size / step) + 1, half = size / 2;
       const nh = this.near.half - 30;
       const info = new Float32Array(n * n * 4);
+      const H = new Float32Array(n * n);
       const geo = gridGeometry(n, step, -half, -half, (i, j) => {
         const x = -half + i * step, z = -half + j * step;
         const inside = Math.abs(x) < nh && Math.abs(z) < nh;
         const id = (j * n + i) * 4;
         info[id] = this.trackDistCoarse(x, z); info[id + 1] = 0; info[id + 2] = lakeSdf(x, z);
-        return inside ? this.heightAt(x, z) - 6 : this.natural(x, z);
+        const h = inside ? this.lowestNear(x, z, step * 1.05) - 8 : this.natural(x, z);
+        H[j * n + i] = h;
+        return h;
       });
+      this.far = { n, step, half, H };
       geo.setAttribute('aInfo', new THREE.BufferAttribute(info, 4));
       const mesh = new THREE.Mesh(geo, material);
       mesh.receiveShadow = true;
