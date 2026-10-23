@@ -110,10 +110,9 @@ function cockpit(P, c) {
   for (const s of [1, -1]) {
     const sh = [s * 0.16, shoulderY, shoulderZ];
     const elbow = [s * 0.2, (shoulderY + wheel.y) / 2 - 0.05, (shoulderZ + wheel.z) / 2];
-    const hand = [s * 0.135, wheel.y - 0.005, wheel.z - 0.03];
     P.suit.push(strut(sh, elbow, 0.04, 1));
-    P.suit.push(strut(elbow, hand, 0.034, 1));
-    P.glove.push(new THREE.SphereGeometry(0.038, 10, 8).translate(...hand));
+    P.suit.push(new THREE.SphereGeometry(0.042, 10, 8).translate(...elbow));
+    P.elbows.push(elbow);
   }
 }
 
@@ -316,7 +315,7 @@ export function buildCar(car) {
     return mix(vec3(new THREE.Color(car.livery.accent)), vec3(new THREE.Color(car.livery.base)), stripe);
   })();
   const visor = new THREE.MeshPhysicalNodeMaterial({ color: 0x0a0d12, roughness: 0.05, metalness: 0.6, clearcoat: 1 });
-  const parts = { paint: [], carbon: [], matt: [], metal: [], dark: [], tub: [], suit: [], glove: [] };
+  const parts = { paint: [], carbon: [], matt: [], metal: [], dark: [], tub: [], suit: [], glove: [], elbows: [] };
   const geo = era === 'classic' ? classicGeometry(parts) : era === 'v10' ? v10Geometry(parts) : modernGeometry(parts);
 
   const add = (list, mat) => {
@@ -327,8 +326,9 @@ export function buildCar(car) {
   };
   add(parts.paint, paint); add(parts.carbon, carbon); add(parts.matt, matt); add(parts.metal, metal); add(parts.dark, dark);
   add(parts.tub, new THREE.MeshStandardNodeMaterial({ color: 0x0c0d10, roughness: 0.85, side: THREE.BackSide }));
-  add(parts.suit, new THREE.MeshStandardNodeMaterial({ color: new THREE.Color(car.livery.base).multiplyScalar(0.55), roughness: 0.9 }));
-  add(parts.glove, new THREE.MeshStandardNodeMaterial({ color: new THREE.Color(car.livery.accent).multiplyScalar(0.7), roughness: 0.8 }));
+  const suitMat = new THREE.MeshStandardNodeMaterial({ color: new THREE.Color(car.livery.base).multiplyScalar(0.55), roughness: 0.9 });
+  const gloveMat = new THREE.MeshStandardNodeMaterial({ color: new THREE.Color(car.livery.accent).multiplyScalar(0.7), roughness: 0.8 });
+  add(parts.suit, suitMat);
 
   // driver helmet
   const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.135, 24, 16), helmetMat);
@@ -390,8 +390,33 @@ export function buildCar(car) {
   sw.group.position.set(0, geo.wheelY, geo.wheelZ);
   root.add(sw.group);
 
+  // forearms and gloves follow the wheel's grips; updateHands() runs after each steering change
+  const arms = parts.elbows.map((e, k) => {
+    const fore = new THREE.Mesh(new THREE.CylinderGeometry(0.031, 0.036, 1, 8), suitMat);
+    const glove = new THREE.Mesh(new THREE.SphereGeometry(0.038, 12, 8), gloveMat);
+    glove.scale.set(1, 0.9, 1.25);
+    fore.castShadow = glove.castShadow = true;
+    root.add(fore, glove);
+    return { elbow: new THREE.Vector3(...e), fore, glove, grip: new THREE.Vector3(...sw.grips[k]) };
+  });
+  const _g = new THREE.Vector3(), _d = new THREE.Vector3(), _up = new THREE.Vector3(0, 1, 0);
+  const updateHands = () => {
+    sw.group.updateMatrix();
+    for (const a of arms) {
+      _g.copy(a.grip).applyMatrix4(sw.group.matrix);
+      a.glove.position.copy(_g);
+      a.glove.quaternion.copy(sw.group.quaternion);
+      _d.copy(_g).sub(a.elbow);
+      const len = _d.length();
+      a.fore.position.copy(a.elbow).addScaledVector(_d, 0.5);
+      a.fore.quaternion.setFromUnitVectors(_up, _d.normalize());
+      a.fore.scale.set(1, len, 1);
+    }
+  };
+  updateHands();
+
   root.userData = {
-    wheels, flap, rainOn, steeringWheel: sw, paint,
+    wheels, flap, rainOn, steeringWheel: sw, paint, updateHands,
     eye: new THREE.Vector3(0, geo.helmetY + 0.085, geo.helmetZ + 0.13),
     tcam: new THREE.Vector3(0, geo.tcamY, geo.tcamZ),
     nose: new THREE.Vector3(0, geo.noseCamY, geo.noseCamZ),
@@ -423,7 +448,8 @@ function buildSteeringWheel(era) {
   if (era === 'classic') {
     const rimG = new THREE.TorusGeometry(0.17, 0.014, 8, 32);
     group.add(new THREE.Mesh(rimG, new THREE.MeshStandardNodeMaterial({ color: 0x3a2a1c, roughness: 0.6 })));
-    return { group, canvas, tex, draw: () => {} };
+    // hands at ten to two on the rim
+    return { group, canvas, tex, draw: () => {}, grips: [[0.15, 0.075, -0.012], [-0.15, 0.075, -0.012]] };
   }
   const body = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.12, 0.04), bodyMat);
   group.add(body);
@@ -470,7 +496,7 @@ function buildSteeringWheel(era) {
     g.textAlign = 'right'; g.fillStyle = '#8fd1ff'; g.fillText('RW', 244, 104);
     tex.needsUpdate = true;
   };
-  return { group, canvas, tex, draw };
+  return { group, canvas, tex, draw, grips: [[0.125, -0.006, -0.018], [-0.125, -0.006, -0.018]] };
 }
 
 // 2026 car: low nose, narrow wings, halo, wheel covers

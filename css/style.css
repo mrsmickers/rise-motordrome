@@ -44,6 +44,7 @@ kbd { font-family: var(--font-cond); font-size: 11px; padding: 1px 5px; border: 
 .intro { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: var(--gutter);
   background: radial-gradient(120% 90% at 30% 20%, rgba(11, 16, 22, 0.15), rgba(11, 16, 22, 0.78) 70%); transition: opacity 0.9s ease, visibility 0.9s; }
 .intro.gone { opacity: 0; visibility: hidden; pointer-events: none; }
+
 .intro-card { width: min(560px, 100%); padding: 30px 32px 24px; border-radius: 22px; background: var(--glass-strong); border: 1px solid var(--line);
   backdrop-filter: blur(18px) saturate(1.2); -webkit-backdrop-filter: blur(18px) saturate(1.2); box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45); }
 .eyebrow { margin: 16px 0 6px; font: 600 13px/1 var(--font-cond); letter-spacing: 0.14em; text-transform: uppercase; color: var(--rw-yellow); }
@@ -297,4 +298,23 @@ body.touch-ui .hud-bc { display: none; }
   body.touch-ui .touch-pedal { width: 76px; height: 96px; }
   body.touch-ui .start-lights { top: 14%; gap: 8px; padding: 10px 12px; }
   body.touch-ui .start-lights span { width: 30px; height: 30px; }
+}
+
+/* Short screens: compact title card so the start buttons stay in view */
+@media (max-height: 760px) {
+  .intro { place-items: start center; overflow-y: auto; }
+  .intro-card { margin: auto 0; padding: 20px 24px 18px; }
+  .intro-map { height: 110px; margin: 8px 0 2px; }
+  .facts { margin: 8px 0 12px; }
+  .facts div { padding: 8px 10px 6px; }
+  .lede { font-size: 14px; }
+}
+@media (max-height: 520px) {
+  .intro-map, .lede, .hint-keys { display: none; }
+  .intro-card { width: min(760px, 100%); padding: 14px 20px 14px; }
+  .eyebrow { margin-top: 10px; }
+  .intro-status, .intro-actions { margin-top: 2px; }
+  .facts dd { font-size: 16px; }
+  .facts { grid-template-columns: repeat(4, 1fr); }
+  .intro h1 { font-size: 34px; }
 }

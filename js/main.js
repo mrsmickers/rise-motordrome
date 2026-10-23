@@ -444,7 +444,9 @@ function updatePose(dt) {
   if (ud.flap) ud.flap.rotation.x += ((v.straightMode ? -0.42 : 0) - ud.flap.rotation.x) * Math.min(1, dt * 10);
   const blink = Math.floor(performance.now() / 120) % 2;
   ud.rainOn.value = (car.engine.hybrid && v.brake > 0.1 && blink) || app.atmo.U.night.value > 0.5 ? 1 : 0.0;
-  ud.steeringWheel.group.rotation.z = v.steer * 1.1;
+  // seen from the driver's seat (looking along +z) a left turn is anticlockwise: a negative rotation about z
+  ud.steeringWheel.group.rotation.z = -v.steer * 1.15;
+  ud.updateHands();
   const rimMat = ud.wheels[0].spin.children[1].material;
   if (rimMat.userData.speed) rimMat.userData.speed.value = Math.abs(v.v);
 }
