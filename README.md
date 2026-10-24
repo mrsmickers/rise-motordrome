@@ -1,6 +1,6 @@
 # African Grand Prix
 
-Version 0.8 beta.
+Version 0.9 beta.
 
 A browser sim of the planned African Grand Prix circuit in Bugesera, Rwanda (interim name RISE Motordrome), built with three.js (WebGPU, with a WebGL 2 fallback). You drive or ride along in an F1 car on a 6 km, 17-turn lap with 197 m of climbing, beside a lake.
 
@@ -38,11 +38,22 @@ All paths are relative, so it works from a sub-path. The `.nojekyll` file stops 
 | `R` | Back on track |
 | `T` | Time of day: dawn, day, sunset, floodlit night |
 | `C` | Reverse: run the lap clockwise (also on the title screen and the toolbar) |
+| `L` | Assist level: Beginner, Intermediate, Advanced (also on the title screen and the toolbar) |
 | `N` / `H` / `F` | Sound, HUD (the eye button top right brings it back), full screen |
 | `Esc` | Back to the menu (also the Menu button, top left) |
 | Mouse drag / scroll | Look around / zoom |
 
 Gamepads may work (right trigger throttle, left trigger brake, left stick steer, Y camera, X hot lap) but are untested. Phones get an on-screen steering pad and pedals.
+
+## Assists
+
+| Level | What helps |
+| --- | --- |
+| Beginner (default) | Chevrons along the racing line; steering follows the line and your steering moves you up to 3 m either side of it; braking help; traction control; auto recovery |
+| Intermediate | Chevrons in the braking zones only; traction control; a nudge back at the track edge; auto recovery |
+| Advanced | Nothing |
+
+Chevrons go yellow where you should lift and red from the point where you need to brake, worked out from your speed each frame. The choice is remembered in the browser.
 
 ## The cars
 
@@ -80,4 +91,5 @@ cd tools && python3 build_track.py
 | `js/sky.js` | Sky, sun, shadows, fog and the four times of day |
 | `js/cars.js`, `js/car-model.js`, `js/vehicle.js` | Car specs, 3D models and physics |
 | `js/cameras.js`, `js/input.js`, `js/audio.js`, `js/hud.js` | Cameras, controls, synthesised sound, telemetry |
+| `js/assists.js`, `js/chevrons.js` | Assist levels and the racing-line chevrons |
 | `tools/build_track.py`, `tools/base_centreline.json`, `tools/official_esses.json` | Track generator and the lines it reads |

@@ -17,6 +17,8 @@ import { CameraRig, CAMERAS, placeTvCameras } from './cameras.js';
 import { Input } from './input.js';
 import { Sound } from './audio.js';
 import { Hud } from './hud.js';
+import { Assists, LEVELS, LEVEL_ORDER } from './assists.js';
+import { buildChevrons } from './chevrons.js';
 
 const $ = (id) => document.getElementById(id);
 const nextFrame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
@@ -106,6 +108,9 @@ async function boot() {
   await status('Planting acacias and papyrus', 0.7);
   const veg = buildVegetation(track, terrain, atmo.U, tvSpots);
   scene.add(veg);
+  app.assists = new Assists();
+  try { const saved = localStorage.getItem('agp-assists'); if (LEVELS[saved]) app.assists.level = saved; } catch { /* storage may be blocked */ }
+  rebuildChevrons();
   await status('Rolling out the car', 0.8);
   setCar(0, true);
 
@@ -137,8 +142,11 @@ async function boot() {
   const preUpdate = prePass.updateBefore.bind(prePass);
   prePass.updateBefore = (frame) => {
     for (const o of skip) o.visible = false;
+    const chev = app.chev && app.chev.mesh, chevShown = chev && chev.visible;
+    if (chev) chev.visible = false;
     const r = preUpdate(frame);
     for (const o of skip) o.visible = true;
+    if (chev) chev.visible = chevShown;
     return r;
   };
   const aoPass = ao(prePass.getTextureNode('depth'), prePass.getTextureNode(), camera);
@@ -203,7 +211,9 @@ async function boot() {
 async function warmUp() {
   const rig = app.rig, frames = (n) => new Promise((res) => { let k = 0; const f = () => (++k >= n ? res() : requestAnimationFrame(f)); requestAnimationFrame(f); });
   rig.cinematic = false;
+  app.warming = true; // chevrons too, so the first Drive press does not build their shader
   for (const i of [2, 0, 4, 5, 1, 3]) { rig.set(i); await frames(4); }
+  app.warming = false;
   rig.cinematic = true; rig.first = true;
   const t0 = performance.now();
   let good = 0;
@@ -230,10 +240,35 @@ function setCar(i, first = false) {
     app.vehicle.gear = 0;
     app.sound.setCar(car);
     app.hud.setCar(car);
+    rebuildChevrons();
     document.querySelectorAll('.car-card').forEach((c, k) => c.classList.toggle('active', k === i));
   } else {
     app.vehicle.setCar(car);
   }
+}
+
+// Chevrons follow the racing line and target speeds of this car on this direction of the lap
+function rebuildChevrons() {
+  if (app.chev) {
+    app.scene.remove(app.chev.mesh);
+    app.chev.mesh.geometry.dispose();
+    app.chev.mesh.material.dispose();
+  }
+  app.chev = buildChevrons(app.track, app.vehicle.profile, app.atmo.U);
+  app.chev.mesh.visible = false;
+  app.scene.add(app.chev.mesh);
+}
+
+function setAssist(level) {
+  if (!LEVELS[level]) return;
+  app.assists.level = level;
+  try { localStorage.setItem('agp-assists', level); } catch { /* storage may be blocked */ }
+  const cfg = LEVELS[level];
+  document.querySelectorAll('.assist-btn').forEach((b) => { const on = b.dataset.assist === level; b.classList.toggle('active', on); b.setAttribute('aria-pressed', String(on)); });
+  $('assist-summary').textContent = cfg.summary;
+  $('btn-assist-label').textContent = cfg.label;
+  $('btn-assist').title = `Assists: ${cfg.label} [L]`;
+  app.hud.setAssist(cfg.label);
 }
 
 function buildCarPicker() {
@@ -272,6 +307,9 @@ function wireUi() {
   document.querySelectorAll('.dir-btn').forEach((b) => b.addEventListener('click', () => setDirection(b.dataset.dir === '1', false)));
   $('btn-show').addEventListener('click', () => toggleHud(false));
   $('btn-menu').addEventListener('click', returnToMenu);
+  document.querySelectorAll('.assist-btn').forEach((b) => b.addEventListener('click', () => setAssist(b.dataset.assist)));
+  $('btn-assist').addEventListener('click', () => setAssist(LEVEL_ORDER[(LEVEL_ORDER.indexOf(app.assists.level) + 1) % LEVEL_ORDER.length]));
+  setAssist(app.assists.level);
   $('btn-sound').addEventListener('click', toggleSound);
   $('btn-hide').addEventListener('click', () => toggleHud(true));
   $('btn-full').addEventListener('click', toggleFull);
@@ -324,6 +362,7 @@ function setDirection(rev, restart) {
     app.track = rev ? app.trackRev : app.trackFwd;
     v.track = app.track;
     v.setCar(CARS[app.carIndex]);
+    rebuildChevrons();
     // same spot on the road, now facing the other way
     v.reset(rev ? app.track.wrap(app.track.length - sF) : sF, -d);
     app.hud.setTrack(app.track);
@@ -368,7 +407,9 @@ async function start(hotlap) {
   app.rig.set(2); // cockpit
   setAutopilot(hotlap);
   restartRun(hotlap);
-  app.hud.hint('<kbd>W</kbd> throttle · <kbd>S</kbd> brake · <kbd>A</kbd><kbd>D</kbd> steer · <kbd>V</kbd> camera · <kbd>P</kbd> hot lap · <kbd>T</kbd> time of day');
+  app.hud.hint(app.assists.level === 'beginner'
+    ? '<kbd>W</kbd> throttle · <kbd>A</kbd><kbd>D</kbd> move across the line · steering and braking are helped · <kbd>L</kbd> assists · <kbd>V</kbd> camera'
+    : '<kbd>W</kbd> throttle · <kbd>S</kbd> brake · <kbd>A</kbd><kbd>D</kbd> steer · <kbd>L</kbd> assists · <kbd>V</kbd> camera · <kbd>P</kbd> hot lap');
   setTimeout(() => app.hud.hint(''), 9000);
 }
 
@@ -428,6 +469,7 @@ function onKey(e) {
     case 'KeyN': toggleSound(); break;
     case 'KeyH': toggleHud(!$('hud').classList.contains('clean')); break;
     case 'KeyC': setDirection(!app.reverse, true); break;
+    case 'KeyL': setAssist(LEVEL_ORDER[(LEVEL_ORDER.indexOf(app.assists.level) + 1) % LEVEL_ORDER.length]); break;
     case 'Escape': if (!document.querySelector(':popover-open')) returnToMenu(); break;
     case 'KeyF': toggleFull(); break;
     default: break;
@@ -524,12 +566,19 @@ function frame(dt) {
       v.rpm = Math.max(eng.idle, eng.idle + thr * (eng.shift * 0.75 - eng.idle));
       v.throttle = thr;
     } else if (app.autopilot) v.autopilot(dt);
-    else v.step(dt, inp);
+    else v.step(dt, app.assists.apply(v, inp, dt));
   } else {
     v.autopilot(dt);
   }
   const crossed = v.crossedLine;
   v.crossedLine = false;
+  if (app.chev) {
+    const line = app.assists.cfg.line;
+    app.chev.mesh.visible = app.warming || (app.mode === 'drive' && !app.autopilot && line !== 'off');
+    app.chev.u.mode.value = line === 'braking' ? 2 : 1;
+    // a braking rate a driver can hold without locking up: about 2.8 g in a modern car, 0.9 g in 1967
+    app.chev.update(v.s, Math.max(0, v.v), v.car.era === 'classic' ? 9 : 27);
+  }
   updatePose(dt);
   if (app.freeCam) {
     app.camera.position.copy(app.freeCam.pos);
@@ -540,7 +589,7 @@ function frame(dt) {
   app.atmo.update(dt, app.pose.pos);
   if (app.mode === 'drive') {
     app.hud.timing(app.simTime, v, crossed);
-    let mode = app.autopilot ? 'Hot lap' : '';
+    let mode = app.autopilot ? 'Hot lap' : app.assists.recovered > 0 ? 'Back on track' : '';
     if (v.straightMode && !mode) mode = 'Straight-line mode';
     if (v.boost && !mode) mode = 'Boost';
     app.hud.update(v, CARS[app.carIndex], app.rig.label, mode);

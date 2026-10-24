@@ -70,6 +70,9 @@ kbd { font-family: var(--font-cond); font-size: 11px; padding: 1px 5px; border: 
 .dir-btn:hover { color: var(--text); background: rgba(255, 255, 255, 0.09); }
 .dir-btn.active { color: var(--text); border-color: var(--rw-yellow); background: rgba(250, 210, 1, 0.1); }
 .dir-btn:focus-visible { outline: 2px solid var(--rw-blue); outline-offset: 2px; }
+.assist-summary { margin: -6px 0 14px; font-size: 13px; color: var(--muted); }
+.assists-list { grid-template-columns: 1fr !important; margin-bottom: 16px !important; }
+.info h3 + .assists-list li { line-height: 1.4; }
 .tool-btn[aria-pressed="true"]#btn-reverse { color: var(--rw-yellow); background: rgba(250, 210, 1, 0.12); }
 .intro-actions[hidden] { display: none; }
 .btn { display: inline-flex; align-items: center; gap: 9px; padding: 13px 20px; border-radius: 12px; border: 1px solid var(--line-strong); background: rgba(255, 255, 255, 0.06);
@@ -306,7 +309,7 @@ body.touch-ui .hud-bc { display: none; }
   .lede { font-size: 14px; }
 }
 @media (max-height: 520px) {
-  .intro-map, .lede, .hint-keys { display: none; }
+  .intro-map, .lede, .hint-keys, .assist-summary { display: none; }
   .intro-card { width: min(760px, 100%); padding: 14px 20px 14px; }
   .eyebrow { margin-top: 10px; }
   .intro-status, .intro-actions { margin-top: 2px; }

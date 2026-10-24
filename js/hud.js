@@ -41,10 +41,20 @@ export class Hud {
 
   get bestKey() { return 'rise-best-' + this.carId + (this.track.reversed ? '-reverse' : ''); }
 
+  setAssist(label) {
+    this.assistLabel = label;
+    if (this.car) this._carLine();
+  }
+
+  _carLine() {
+    const c = this.car;
+    this.el.car.textContent = `${c.eraLabel} · ${c.name}` + (this.track.reversed ? ' · reverse' : '') + (this.assistLabel ? ` · ${this.assistLabel}` : '');
+  }
+
   setCar(car) {
     this.car = car;
     this.carId = car.id;
-    this.el.car.textContent = `${car.eraLabel} · ${car.name}` + (this.track.reversed ? ' · reverse' : '');
+    this._carLine();
     try { this.best = Number(localStorage.getItem(this.bestKey)) || Infinity; } catch { this.best = Infinity; }
     this.el.best.textContent = fmt(this.best);
     this.resetLap();
