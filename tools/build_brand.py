@@ -24,13 +24,13 @@ BRANDS = {
     'ingenio': {
         'navy': '#222E40', 'accent': '#DEDC00', 'white': '#FFFFFF',
         'font': (manrope(), 0),
-        'logo': 'ingenio-logo-white.png', 'badge': None,
+        'logo': 'ingenio-logo-white.png',
         'domain': 'ingeniotech.co.uk', 'line': ['IT Support', 'Cyber Security', 'AI Support'],
     },
     'assurix': {
         'navy': '#111F46', 'accent': '#BED95C', 'white': '#FFFFFF',
         'font': (HELVETICA, 1) if os.path.exists(HELVETICA) else (manrope(), 0),
-        'logo': 'assurix-logo-white.png', 'badge': 'assurix-trustmark.png',
+        'logo': 'assurix-logo-white.png',
         'domain': 'assurix.com', 'line': ['Proof, not promises'],
     },
 }
