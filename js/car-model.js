@@ -1,9 +1,95 @@
 import * as THREE from 'three/webgpu';
 import {
   Fn, positionLocal, normalLocal, vec2, vec3, float, mix, smoothstep, step, abs, fract, floor, max, min, sin, cos, atan, length,
-  mx_noise_float, mx_worley_noise_float, uniform, clamp, select, uv, time
+  mx_noise_float, mx_worley_noise_float, uniform, clamp, select, uv, time, texture
 } from 'three/tsl';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+
+// ---------- 2026 car model ----------
+// "2026 Redbull RB22" by Tyler_Dave (https://sketchfab.com/3d-models/2026-redbull-rb22-0a3d24a58e0549d591a5a48c22eec383),
+// licensed CC BY 4.0. This copy comes from github.com/AgentiLoop/F1 (models/rb22.glb). Changes made here at load time:
+// the Red Bull livery, sponsor decals, driver name and number, steering wheel and tyre lettering are removed, the body
+// takes this sim's liveries, and the wheels are split per corner so they can steer and spin.
+let MODEL = null;
+const HIDE_NODES = new Set(['Object_16', 'Object_17', 'Object_18', 'Object_25', 'Object_26', 'Object_27', 'Object_28']); // its steering wheel
+const ROLE = { redbull_paint: 'paint', redbull_decals: 'hide', redbull_number_3: 'hide', redbull_color: 'accent', gp21_cinture: 'belt', discs: 'wheel', redbull_wheel_hub: 'wheel', sidewall: 'tyre' };
+
+export async function loadCarModel(url = 'models/rb22.glb') {
+  try {
+    const loader = new GLTFLoader();
+    loader.setMeshoptDecoder(MeshoptDecoder);
+    MODEL = prepareModel(await loader.loadAsync(url));
+  } catch (err) {
+    console.warn('Car model unavailable, using the built-in car', err);
+    MODEL = null;
+  }
+  return MODEL;
+}
+
+// Float copy of a (possibly quantised) attribute, so transforms can take values past ±1
+function floatAttr(a) {
+  const out = new Float32Array(a.count * a.itemSize);
+  for (let i = 0; i < a.count; i++) for (let k = 0; k < a.itemSize; k++) out[i * a.itemSize + k] = a.getComponent(i, k);
+  return new THREE.BufferAttribute(out, a.itemSize);
+}
+
+function prepareModel(gltf) {
+  gltf.scene.updateMatrixWorld(true);
+  const lift = new THREE.Matrix4().makeTranslation(0, 0.032, 0); // tyres on the ground
+  const body = [], wheelBits = [];
+  let sidewallMat = null;
+  gltf.scene.traverse((o) => {
+    if (!o.isMesh || HIDE_NODES.has(o.name)) return;
+    const role = ROLE[o.material.name.split('.')[0]] || 'keep';
+    if (role === 'hide') return;
+    let g = new THREE.BufferGeometry();
+    for (const [k, a] of Object.entries(o.geometry.attributes)) g.setAttribute(k, floatAttr(a));
+    if (o.geometry.index) g.setIndex(o.geometry.index.clone());
+    g.applyMatrix4(new THREE.Matrix4().multiplyMatrices(lift, o.matrixWorld));
+    if (role === 'tyre') sidewallMat = o.material;
+    (role === 'wheel' || role === 'tyre' ? wheelBits : body).push({ geometry: g, material: o.material, role });
+  });
+  // split the wheel meshes (all four wheels in one) by corner, then centre each corner on its axle
+  const corners = [[1, 1], [-1, 1], [1, -1], [-1, -1]].map(([sx, sz]) => ({ sx, sz, parts: [], box: new THREE.Box3() }));
+  for (const bit of wheelBits) {
+    const g = bit.geometry.index ? bit.geometry.toNonIndexed() : bit.geometry;
+    const pos = g.attributes.position;
+    const pick = corners.map(() => []);
+    for (let t = 0; t < pos.count; t += 3) {
+      const cx = (pos.getX(t) + pos.getX(t + 1) + pos.getX(t + 2)) / 3, cz = (pos.getZ(t) + pos.getZ(t + 1) + pos.getZ(t + 2)) / 3;
+      pick[(cx >= 0 ? 0 : 1) + (cz >= 0 ? 0 : 2)].push(t);
+    }
+    corners.forEach((c, k) => {
+      if (!pick[k].length) return;
+      const part = new THREE.BufferGeometry();
+      for (const [name, a] of Object.entries(g.attributes)) {
+        const s = a.itemSize, arr = new Float32Array(pick[k].length * 3 * s);
+        pick[k].forEach((t, i) => arr.set(a.array.subarray(t * s, (t + 3) * s), i * 3 * s));
+        part.setAttribute(name, new THREE.BufferAttribute(arr, s));
+      }
+      part.computeBoundingBox();
+      if (bit.role === 'tyre') c.box.union(part.boundingBox);
+      c.parts.push({ geometry: part, material: bit.material, role: bit.role });
+    });
+  }
+  for (const c of corners) {
+    c.centre = c.box.getCenter(new THREE.Vector3());
+    c.front = c.sz > 0;
+    for (const p of c.parts) { p.geometry.translate(-c.centre.x, -c.centre.y, -c.centre.z); p.geometry.computeBoundingSphere(); }
+  }
+  for (const b of body) b.geometry.computeBoundingSphere();
+  // tyre texture with the red sidewall lettering painted out
+  const tyre = new THREE.MeshStandardNodeMaterial({ roughness: 0.85, side: THREE.DoubleSide });
+  if (sidewallMat && sidewallMat.map) {
+    const t = texture(sidewallMat.map, uv());
+    const lettering = smoothstep(0.1, 0.25, t.r.sub(max(t.g, t.b)));
+    // the normal map is left off: it carries the same lettering embossed in the rubber
+    tyre.colorNode = mix(t.rgb, vec3(0.035, 0.035, 0.038), lettering);
+  } else tyre.colorNode = vec3(0.035);
+  return { body, corners, tyre };
+}
 
 // Car local frame: +z forward, +x left, +y up, origin on the ground at mid wheelbase.
 
@@ -90,6 +176,20 @@ function bodyHalfWidth(sections, z, y) {
   const w = L('w'), h = L('h'), yc = L('y'), n = L('n', 3);
   const r = Math.min(0.92, Math.abs(y - yc) / h);
   return w * Math.pow(1 - Math.pow(r, n), 1 / n);
+}
+
+// Driver's shoulders and upper arms; forearms are added later so they can follow the wheel
+function driverBody(P, { wheel, shoulderY, shoulderZ }) {
+  const torso = new THREE.SphereGeometry(1, 16, 10);
+  torso.scale(0.2, 0.09, 0.16); torso.translate(0, shoulderY - 0.03, shoulderZ - 0.06);
+  P.suit.push(torso);
+  for (const s of [1, -1]) {
+    const sh = [s * 0.16, shoulderY, shoulderZ];
+    const elbow = [s * 0.2, (shoulderY + wheel.y) / 2 - 0.05, (shoulderZ + wheel.z) / 2];
+    P.suit.push(strut(sh, elbow, 0.04, 1));
+    P.suit.push(new THREE.SphereGeometry(0.042, 10, 8).translate(...elbow));
+    P.elbows.push(elbow);
+  }
 }
 
 // Open cockpit: dark tub with padded rim, driver's shoulders and arms reaching to the wheel
@@ -316,7 +416,8 @@ export function buildCar(car) {
   })();
   const visor = new THREE.MeshPhysicalNodeMaterial({ color: 0x0a0d12, roughness: 0.05, metalness: 0.6, clearcoat: 1 });
   const parts = { paint: [], carbon: [], matt: [], metal: [], dark: [], tub: [], suit: [], glove: [], elbows: [] };
-  const geo = era === 'classic' ? classicGeometry(parts) : era === 'v10' ? v10Geometry(parts) : modernGeometry(parts);
+  const geo = era === 'classic' ? classicGeometry(parts) : era === 'v10' ? v10Geometry(parts)
+    : MODEL ? modelGeometry(parts, root, paint, car) : modernGeometry(parts);
 
   const add = (list, mat) => {
     if (!list.length) return;
@@ -369,7 +470,20 @@ export function buildCar(car) {
   const rimMat = rimMaterial(car.model.wheelCovers);
   tyreMat.userData.R.value = car.wheelRadius;
   tyreMat.userData.RR.value = car.model.rimRadius;
-  for (const w of geo.wheels) {
+  for (const c of geo.corners || []) {
+    const steer = new THREE.Group();
+    steer.position.copy(c.centre);
+    const spin = new THREE.Group();
+    steer.add(spin);
+    for (const p of c.parts) {
+      const m = new THREE.Mesh(p.geometry, p.role === 'tyre' ? MODEL.tyre : p.material);
+      m.castShadow = true; m.receiveShadow = true;
+      spin.add(m);
+    }
+    root.add(steer);
+    wheels.push({ steer, spin, front: c.front });
+  }
+  for (const w of geo.corners ? [] : geo.wheels) {
     const steer = new THREE.Group();
     steer.position.set(w.x, car.wheelRadius, w.z);
     const spin = new THREE.Group();
@@ -497,6 +611,25 @@ function buildSteeringWheel(era) {
     tex.needsUpdate = true;
   };
   return { group, canvas, tex, draw, grips: [[0.125, -0.006, -0.018], [-0.125, -0.006, -0.018]] };
+}
+
+// 2026 car from the model: body parts go straight onto the root, the driver is added on top
+function modelGeometry(P, root, paint, car) {
+  const accent = new THREE.MeshPhysicalNodeMaterial({ color: new THREE.Color(car.livery.accent), roughness: 0.3, clearcoat: 1 });
+  const belt = new THREE.MeshStandardNodeMaterial({ color: new THREE.Color(car.livery.third).multiplyScalar(0.6), roughness: 0.8 });
+  for (const b of MODEL.body) {
+    const mat = b.role === 'paint' ? paint : b.role === 'accent' ? accent : b.role === 'belt' ? belt : b.material;
+    const m = new THREE.Mesh(b.geometry, mat);
+    m.castShadow = true; m.receiveShadow = true;
+    root.add(m);
+  }
+  const wheel = { y: 0.61, z: 0.69 };
+  driverBody(P, { wheel, shoulderY: 0.66, shoulderZ: 0.16 });
+  return {
+    corners: MODEL.corners,
+    helmetY: 0.8, helmetZ: 0.12, flap: null, rainY: 0.37, rainZ: -2.47,
+    wheelY: wheel.y, wheelZ: wheel.z, tcamY: 1.22, tcamZ: -0.2, noseCamY: 0.5, noseCamZ: 2.2
+  };
 }
 
 // 2026 car: low nose, narrow wings, halo, wheel covers

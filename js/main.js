@@ -10,7 +10,7 @@ import { Atmosphere, PRESETS, PRESET_ORDER } from './sky.js';
 import { buildLake } from './water.js';
 import { buildScenery } from './scenery.js';
 import { buildVegetation } from './trees.js';
-import { buildCar } from './car-model.js';
+import { buildCar, loadCarModel } from './car-model.js';
 import { CARS } from './cars.js';
 import { Vehicle } from './vehicle.js';
 import { CameraRig, CAMERAS, placeTvCameras } from './cameras.js';
@@ -112,6 +112,7 @@ async function boot() {
   try { const saved = localStorage.getItem('agp-assists'); if (LEVELS[saved]) app.assists.level = saved; } catch { /* storage may be blocked */ }
   rebuildChevrons();
   await status('Rolling out the car', 0.8);
+  await loadCarModel();
   setCar(0, true);
 
   // camera, input, sound, HUD

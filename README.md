@@ -1,10 +1,10 @@
 # African Grand Prix
 
-Version 0.9 beta.
+Version 0.10 beta.
 
 A browser sim of the planned African Grand Prix circuit in Bugesera, Rwanda (interim name RISE Motordrome), built with three.js (WebGPU, with a WebGL 2 fallback). You drive or ride along in an F1 car on a 6 km, 17-turn lap with 197 m of climbing, beside a lake.
 
-Everything is generated in code: the terrain, track, stands, trees, cars and all the sound. The only downloads are three.js from jsDelivr and two Google Fonts.
+The 2026 car is a 3D model, ["2026 Redbull RB22"](https://sketchfab.com/3d-models/2026-redbull-rb22-0a3d24a58e0549d591a5a48c22eec383) by [Tyler_Dave](https://sketchfab.com/Tyler_Dave), licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), with its livery and branding removed and repainted at load time (see `models/CREDITS.md`). Everything else is generated in code: the terrain, track, stands, trees, the 2005 and 1967 cars and all the sound. The other downloads are three.js from jsDelivr and two Google Fonts.
 
 ## Run it locally
 
@@ -92,4 +92,5 @@ cd tools && python3 build_track.py
 | `js/cars.js`, `js/car-model.js`, `js/vehicle.js` | Car specs, 3D models and physics |
 | `js/cameras.js`, `js/input.js`, `js/audio.js`, `js/hud.js` | Cameras, controls, synthesised sound, telemetry |
 | `js/assists.js`, `js/chevrons.js` | Assist levels and the racing-line chevrons |
+| `models/rb22.glb`, `models/CREDITS.md` | The 2026 car model, its licence and the changes made |
 | `tools/build_track.py`, `tools/base_centreline.json`, `tools/official_esses.json` | Track generator and the lines it reads |
