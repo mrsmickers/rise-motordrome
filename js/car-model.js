@@ -6,6 +6,7 @@ import {
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+import { BRAND, brandTexture } from './brand.js';
 
 // ---------- 2026 car model ----------
 // "2026 Redbull RB22" by Tyler_Dave (https://sketchfab.com/3d-models/2026-redbull-rb22-0a3d24a58e0549d591a5a48c22eec383),
@@ -305,10 +306,12 @@ function liveryMaterial(livery) {
   const pat = livery.pattern;
   const col = Fn(() => {
     const B = vec3(base), A = vec3(accent), T = vec3(third);
+    // stripes run low on the body so the sidepods and engine cover stay plain for the sponsor
     if (pat === 'flag') {
-      const band = smoothstep(0.045, 0.035, abs(p.y.sub(float(0.56).sub(p.z.mul(0.045)))));
-      const low = smoothstep(0.4, 0.36, p.y);
-      const nose = smoothstep(2.1, 2.2, p.z);
+      const band = smoothstep(0.022, 0.014, abs(p.y.sub(float(0.37).sub(p.z.mul(0.02)))));
+      const low = smoothstep(0.345, 0.33, p.y).mul(smoothstep(1.95, 1.85, p.z));
+      // yellow nose, but not the front wing endplates, which carry the logo
+      const nose = smoothstep(2.1, 2.2, p.z).mul(smoothstep(0.42, 0.36, abs(p.x)));
       return mix(mix(mix(B, T, low), A, band), A, nose);
     }
     if (pat === 'zigzag') {
@@ -324,17 +327,17 @@ function liveryMaterial(livery) {
       return mix(B, mix(A, T, n.mul(4.0)), max(crack, heat.mul(0.8)));
     }
     if (pat === 'wave') {
-      const line = smoothstep(0.03, 0.018, abs(p.y.sub(0.52).sub(sin(p.z.mul(3.4)).mul(0.05))));
-      const low = smoothstep(0.38, 0.34, p.y);
+      const line = smoothstep(0.022, 0.013, abs(p.y.sub(0.37).sub(sin(p.z.mul(3.4)).mul(0.03))));
+      const low = smoothstep(0.33, 0.31, p.y).mul(smoothstep(1.95, 1.85, p.z));
       return mix(mix(B, T, low.mul(0.85)), A, line);
     }
     if (pat === 'classic') {
-      const white = smoothstep(0.04, 0.02, abs(p.y.sub(0.5))).mul(step(-0.6, p.z)).mul(step(p.z, 1.2));
-      const low = smoothstep(0.3, 0.27, p.y);
+      const white = smoothstep(0.03, 0.018, abs(p.y.sub(0.62))).mul(step(0.5, p.z));
+      const low = smoothstep(0.26, 0.24, p.y);
       return mix(mix(B, A, white), T, low);
     }
     // 'band': heritage green, yellow nose band, cream roundel
-    const nose = smoothstep(1.45, 1.5, p.z).mul(smoothstep(1.75, 1.7, p.z));
+    const nose = smoothstep(1.7, 1.74, p.z).mul(smoothstep(1.92, 1.88, p.z));
     const disc = smoothstep(0.17, 0.15, length(vec2(p.z.sub(0.85), p.y.sub(0.45))));
     return mix(mix(B, A, nose), T, disc);
   });
@@ -397,6 +400,179 @@ function rimMaterial(covers) {
   return mat;
 }
 
+// ---------- sponsor decals ----------
+// A decal copies the car's own triangles inside a region, lifts them 2 mm off the surface and projects a sponsor
+// texture onto them, so it follows curved bodywork. Two kinds:
+//   flank: projected across the car onto both sides, reading front to back on each side. z1 is the front edge.
+//          bend 'top' or 'mid' makes the text follow the surface's top edge or middle instead of a fixed height yc.
+//   view:  projected from one direction (dir points from the surface to the viewer), for the rear wing.
+//   eye:   projected from the driver's eye, so it reads straight on from the cockpit camera.
+const decalMats = new Map();
+const BUSY = ['zigzag', 'lava'];
+function decalMaterial(key) {
+  if (decalMats.has(key)) return decalMats.get(key);
+  const tex = brandTexture(key);
+  if (!tex) return null;
+  const mat = new THREE.MeshPhysicalNodeMaterial({ transparent: true, depthWrite: false });
+  const st = uv();
+  const inside = step(0.0, st.x).mul(step(st.x, 1.0)).mul(step(0.0, st.y)).mul(step(st.y, 1.0));
+  const t = texture(tex, st);
+  mat.colorNode = t.rgb;
+  mat.opacityNode = t.a.mul(inside);
+  // panels match the paint; lettering on its own is satin vinyl, so it stays readable at a glancing angle
+  const panel = key.endsWith('Panel');
+  mat.roughnessNode = float(panel ? 0.32 : 0.42);
+  mat.metalnessNode = float(panel ? 0.06 : 0.0);
+  mat.clearcoatNode = float(panel ? 1.0 : 0.35);
+  mat.clearcoatRoughnessNode = float(panel ? 0.06 : 0.2);
+  decalMats.set(key, mat);
+  return mat;
+}
+
+const SKIP_DECAL = /light|glass|chrome|mirror|cinture|lcd|led|kers/i;
+
+function addDecals(root, specs, paint, eye, busy) {
+  const meshes = root.children.filter((o) => o.isMesh && o.material.side !== THREE.BackSide && !SKIP_DECAL.test(o.material.name || ''));
+  for (const d of specs) {
+    // on a patterned livery, lettering on paint gets a navy panel behind it
+    const key = busy && d.kind !== 'view' && BRAND.aspect[d.tex + 'Panel'] ? d.tex + 'Panel' : d.tex;
+    const mat = decalMaterial(key);
+    if (!mat) continue;
+    const aspect = BRAND.aspect[key];
+    const tris = [];
+    const c = new THREE.Vector3(), n = new THREE.Vector3();
+    for (const m of meshes) {
+      if (d.paintOnly && m.material !== paint) continue;
+      const g = m.geometry, P = g.attributes.position, N = g.attributes.normal, I = g.index;
+      if (!N) continue;
+      const count = I ? I.count : P.count;
+      for (let t = 0; t < count; t += 3) {
+        const ids = [0, 1, 2].map((k) => (I ? I.getX(t + k) : t + k));
+        c.set(0, 0, 0); n.set(0, 0, 0);
+        for (const i of ids) { c.x += P.getX(i) / 3; c.y += P.getY(i) / 3; c.z += P.getZ(i) / 3; n.x += N.getX(i); n.y += N.getY(i); n.z += N.getZ(i); }
+        n.normalize();
+        if (!decalSelect(d, c, n, eye)) continue;
+        tris.push(ids.map((i) => [P.getX(i), P.getY(i), P.getZ(i), N.getX(i), N.getY(i), N.getZ(i)]));
+      }
+    }
+    if (!tris.length) continue;
+    // the eye projection is not linear, so big triangles are split until the texture lands true
+    if (d.kind === 'eye') tris.splice(0, tris.length, ...tris.flatMap((t) => subdivide(t, 0.03)));
+    const map = decalMapper(d, aspect, tris, eye);
+    const pos = [], nor = [], uvs = [];
+    for (const tri of tris) {
+      const side = Math.sign(tri[0][0] + tri[1][0] + tri[2][0]) || 1;
+      const st = tri.map((v) => map(v, side));
+      // skip triangles wholly outside the decal
+      if (st.every((q) => q[0] < 0) || st.every((q) => q[0] > 1) || st.every((q) => q[1] < 0) || st.every((q) => q[1] > 1)) continue;
+      tri.forEach((v, k) => {
+        pos.push(v[0] + v[3] * 0.002, v[1] + v[4] * 0.002, v[2] + v[5] * 0.002);
+        nor.push(v[3], v[4], v[5]);
+        uvs.push(st[k][0], st[k][1]);
+      });
+    }
+    if (!pos.length) continue;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.name = 'decal-' + key;
+    mesh.receiveShadow = true;
+    mesh.renderOrder = 1;
+    root.add(mesh);
+  }
+}
+
+function subdivide(tri, maxEdge, depth = 0) {
+  const len = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+  if (depth > 6 || Math.max(len(tri[0], tri[1]), len(tri[1], tri[2]), len(tri[2], tri[0])) <= maxEdge) return [tri];
+  const mid = (a, b) => a.map((v, k) => (v + b[k]) / 2);
+  const [a, b, c] = tri, ab = mid(a, b), bc = mid(b, c), ca = mid(c, a);
+  return [[a, ab, ca], [ab, b, bc], [ca, bc, c], [ab, bc, ca]].flatMap((t) => subdivide(t, maxEdge, depth + 1));
+}
+
+function decalSelect(d, c, n, eye) {
+  if (d.kind === 'flank') {
+    const s = Math.sign(c.x) || 1, ax = Math.abs(c.x);
+    return c.z >= d.z0 - 0.03 && c.z <= d.z1 + 0.03 && c.y >= d.yMin && c.y <= d.yMax &&
+      ax >= (d.xMin ?? 0) && ax <= (d.xMax ?? 9) && n.x * s > (d.minN ?? 0.5);
+  }
+  const [x0, y0, z0, x1, y1, z1] = d.box;
+  if (c.x < x0 || c.x > x1 || c.y < y0 || c.y > y1 || c.z < z0 || c.z > z1) return false;
+  if (d.kind === 'eye') {
+    const ex = eye.x - c.x, ey = eye.y - c.y, ez = eye.z - c.z, l = Math.hypot(ex, ey, ez);
+    return (n.x * ex + n.y * ey + n.z * ez) / l > (d.minN ?? 0.05);
+  }
+  return n.x * d.dir[0] + n.y * d.dir[1] + n.z * d.dir[2] > (d.minN ?? 0.05);
+}
+
+function decalMapper(d, aspect, tris, eye) {
+  if (d.kind === 'flank') {
+    let len = d.z1 - d.z0, h = len / aspect;
+    if (d.maxH && h > d.maxH) {
+      // too tall for the surface: shorten it about its middle
+      const mid = (d.z0 + d.z1) / 2;
+      h = d.maxH; len = h * aspect;
+      d = { ...d, z0: mid - len / 2, z1: mid + len / 2 };
+    }
+    let centre = () => d.yc;
+    if (d.bend) {
+      // height of the surface's top edge or middle, every 3 cm along the car
+      const bins = new Map();
+      for (const tri of tris) for (const v of tri) {
+        const k = Math.round(v[2] / 0.03);
+        const b = bins.get(k) || { lo: 9, hi: -9 };
+        b.lo = Math.min(b.lo, v[1]); b.hi = Math.max(b.hi, v[1]);
+        bins.set(k, b);
+      }
+      const keys = [...bins.keys()].sort((a, b) => a - b);
+      const at = keys.map((k) => { const b = bins.get(k); return d.bend === 'top' ? b.hi - (d.below || 0) : (b.lo + b.hi) / 2; });
+      // smooth over neighbours so the text runs in a steady line
+      const sm = at.map((_, i) => { let s = 0, w = 0; for (let j = Math.max(0, i - 2); j <= Math.min(at.length - 1, i + 2); j++) { s += at[j]; w++; } return s / w; });
+      centre = (z) => {
+        const u = z / 0.03;
+        let i = 0;
+        while (i < keys.length - 1 && keys[i + 1] < u) i++;
+        if (u <= keys[0]) return sm[0];
+        if (i >= keys.length - 1) return sm[keys.length - 1];
+        const t = (u - keys[i]) / (keys[i + 1] - keys[i]);
+        return sm[i] + (sm[i + 1] - sm[i]) * t;
+      };
+    }
+    return (v, side) => {
+      const u = side > 0 ? (d.z1 - v[2]) / len : (v[2] - d.z0) / len;
+      return [u, (v[1] - centre(v[2])) / h + 0.5];
+    };
+  }
+  if (d.kind === 'eye') {
+    // perspective from the eye onto a plane through the centre
+    const E = eye.clone(), F = new THREE.Vector3(...d.centre).sub(E);
+    const L = F.length();
+    F.normalize();
+    const R = new THREE.Vector3().crossVectors(F, new THREE.Vector3(0, 1, 0)).normalize();
+    const Up = new THREE.Vector3().crossVectors(R, F);
+    const w = d.width, h = w / aspect;
+    const r = new THREE.Vector3();
+    return (v) => {
+      r.set(v[0], v[1], v[2]).sub(E);
+      const depth = r.dot(F);
+      if (depth <= 0.01) return [-1, -1];
+      r.multiplyScalar(L / depth);
+      return [r.dot(R) / w + 0.5, r.dot(Up) / h + 0.5];
+    };
+  }
+  // view projector: right is dir × up flipped so the text reads for someone looking along -dir
+  const D = new THREE.Vector3(...d.dir).normalize(), Up = new THREE.Vector3(...d.up).normalize();
+  const R = new THREE.Vector3().crossVectors(Up, D).normalize();
+  const C = new THREE.Vector3(...d.centre), w = d.width, h = w / aspect;
+  const p = new THREE.Vector3();
+  return (v) => {
+    p.set(v[0], v[1], v[2]).sub(C);
+    return [p.dot(R) / w + 0.5, p.dot(Up) / h + 0.5];
+  };
+}
+
 // ---------- model builders ----------
 
 export function buildCar(car) {
@@ -427,6 +603,7 @@ export function buildCar(car) {
   };
   add(parts.paint, paint); add(parts.carbon, carbon); add(parts.matt, matt); add(parts.metal, metal); add(parts.dark, dark);
   add(parts.tub, new THREE.MeshStandardNodeMaterial({ color: 0x0c0d10, roughness: 0.85, side: THREE.BackSide }));
+  if (geo.decals) addDecals(root, geo.decals, paint, new THREE.Vector3(0, geo.helmetY + 0.085, geo.helmetZ + 0.13), BUSY.includes(car.livery.pattern));
   const suitMat = new THREE.MeshStandardNodeMaterial({ color: new THREE.Color(car.livery.base).multiplyScalar(0.55), roughness: 0.9 });
   const gloveMat = new THREE.MeshStandardNodeMaterial({ color: new THREE.Color(car.livery.accent).multiplyScalar(0.7), roughness: 0.8 });
   add(parts.suit, suitMat);
@@ -627,8 +804,21 @@ function modelGeometry(P, root, paint, car) {
   driverBody(P, { wheel, shoulderY: 0.66, shoulderZ: 0.16 });
   return {
     corners: MODEL.corners,
+    decals: [
+      // rear wing, as seen from the chase camera behind and a little above
+      { kind: 'view', tex: 'domain', centre: [0, 0.945, -2.28], dir: [0, 0.31, -0.95], up: [0, 0.95, 0.31], width: 0.86, box: [-0.56, 0.86, -2.5, 0.56, 1.03, -2.17] },
+      { kind: 'flank', tex: 'logo', z0: -2.41, z1: -1.91, yc: 0.85, yMin: 0.7, yMax: 1.0, xMin: 0.5, minN: 0.6 },
+      // sidepods: logo over the service line
+      { kind: 'flank', tex: 'lockup', z0: -0.6, z1: 0.25, bend: 'mid', maxH: 0.24, yMin: 0.34, yMax: 0.72, xMin: 0.38, xMax: 0.66, minN: 0.35, paintOnly: true },
+      { kind: 'flank', tex: 'domain', z0: -1.05, z1: -0.35, bend: 'mid', maxH: 0.1, yMin: 0.74, yMax: 1.08, xMin: 0.05, xMax: 0.3, minN: 0.45, paintOnly: true },
+      // halo: outer sides, and the top bar as the driver sees it
+      { kind: 'flank', tex: 'domain', z0: 0.1, z1: 0.45, bend: 'top', below: 0.022, maxH: 0.05, yMin: 0.8, yMax: 1.0, xMin: 0.22, xMax: 0.34, minN: 0.3, paintOnly: true },
+      { kind: 'eye', tex: 'domain', centre: [0, 0.911, 0.58], width: 0.25, box: [-0.36, 0.86, 0.3, 0.36, 0.99, 0.75], paintOnly: true },
+      // front wing endplates
+      { kind: 'flank', tex: 'logo', z0: 2.15, z1: 2.65, yc: 0.31, yMin: 0.17, yMax: 0.47, xMin: 0.58, xMax: 0.72, minN: 0.6, paintOnly: true }
+    ],
     helmetY: 0.8, helmetZ: 0.12, flap: null, rainY: 0.37, rainZ: -2.47,
-    wheelY: wheel.y, wheelZ: wheel.z, tcamY: 1.22, tcamZ: -0.2, noseCamY: 0.5, noseCamZ: 2.2
+    wheelY: wheel.y, wheelZ: wheel.z, tcamY: 1.22, tcamZ: -0.2, noseCamY: 0.66, noseCamZ: 1.95
   };
 }
 
@@ -724,6 +914,15 @@ function modernGeometry(P) {
   P.dark.push(new THREE.BoxGeometry(0.09, 0.05, 0.12).translate(0, 1.02, -0.2));
   return {
     wheels: [{ x: 0.8, z: fa, front: true }, { x: -0.8, z: fa, front: true }, { x: 0.78, z: ra, front: false }, { x: -0.78, z: ra, front: false }],
+    decals: [
+      { kind: 'view', tex: 'domain', centre: [0, 0.86, -2.2], dir: [0, 0.31, -0.95], up: [0, 0.95, 0.31], width: 0.9, box: [-0.5, 0.75, -2.45, 0.5, 1.0, -1.95] },
+      { kind: 'flank', tex: 'logo', z0: -2.52, z1: -2.08, yc: 0.85, yMin: 0.46, yMax: 1.06, xMin: 0.45, minN: 0.6 },
+      { kind: 'flank', tex: 'lockup', z0: -0.7, z1: 0.3, bend: 'mid', maxH: 0.22, yMin: 0.28, yMax: 0.62, xMin: 0.35, xMax: 0.7, minN: 0.35, paintOnly: true },
+      { kind: 'flank', tex: 'domain', z0: -1.1, z1: -0.45, bend: 'mid', maxH: 0.09, yMin: 0.6, yMax: 1.0, xMin: 0.05, xMax: 0.25, minN: 0.5, paintOnly: true },
+      { kind: 'flank', tex: 'domain', z0: -0.02, z1: 0.3, bend: 'top', below: 0.024, maxH: 0.05, yMin: 0.7, yMax: 1.0, xMin: 0.2, xMax: 0.34, minN: 0.3, paintOnly: true },
+      { kind: 'eye', tex: 'domain', centre: [0, 0.97, 0.5], width: 0.25, box: [-0.36, 0.88, 0.25, 0.36, 1.02, 0.6], paintOnly: true },
+      { kind: 'flank', tex: 'logo', z0: 2.68, z1: 3.12, yc: 0.175, yMin: 0.04, yMax: 0.31, xMin: 0.9, minN: 0.6, paintOnly: true }
+    ],
     helmetY: 0.77, helmetZ: 0.03, flap: { y: 0.95, z: -2.3, span: 1.0, chord: 0.2 }, rainY: 0.36, rainZ: -2.4,
     wheelY: 0.67, wheelZ: 0.36, tcamY: 1.08, tcamZ: -0.22, noseCamY: 0.42, noseCamZ: 1.9
   };
@@ -798,6 +997,16 @@ function v10Geometry(P) {
   P.dark.push(new THREE.BoxGeometry(0.09, 0.05, 0.12).translate(0, 1.02, -0.3));
   return {
     wheels: [{ x: 0.74, z: fa, front: true }, { x: -0.74, z: fa, front: true }, { x: 0.72, z: ra, front: false }, { x: -0.72, z: ra, front: false }],
+    decals: [
+      { kind: 'view', tex: 'domain', centre: [0, 0.92, -2.1], dir: [0, 0.31, -0.95], up: [0, 0.95, 0.31], width: 0.68, box: [-0.38, 0.75, -2.4, 0.38, 1.1, -1.85] },
+      { kind: 'flank', tex: 'logo', z0: -2.36, z1: -1.84, yc: 0.88, yMin: 0.34, yMax: 1.08, xMin: 0.37, xMax: 0.42, minN: 0.7 },
+      { kind: 'flank', tex: 'domain', z0: -2.36, z1: -1.84, yc: 0.62, yMin: 0.34, yMax: 1.08, xMin: 0.37, xMax: 0.42, minN: 0.7 },
+      { kind: 'flank', tex: 'lockup', z0: -0.75, z1: 0.3, bend: 'mid', maxH: 0.22, yMin: 0.24, yMax: 0.6, xMin: 0.4, xMax: 0.75, minN: 0.35, paintOnly: true },
+      { kind: 'flank', tex: 'domain', z0: -1.2, z1: -0.4, bend: 'mid', maxH: 0.1, yMin: 0.62, yMax: 1.05, xMin: 0.05, xMax: 0.25, minN: 0.5, paintOnly: true },
+      { kind: 'flank', tex: 'logo', z0: 2.38, z1: 2.82, yc: 0.19, yMin: 0.05, yMax: 0.33, xMin: 0.8, xMax: 0.9, minN: 0.6, paintOnly: true },
+      // nose top, as the driver sees it
+      { kind: 'eye', tex: 'logo', centre: [0, 0.72, 0.7], width: 0.24, box: [-0.3, 0.45, 0.42, 0.3, 0.78, 2.36], paintOnly: true }
+    ],
     helmetY: 0.79, helmetZ: -0.06, flap: null, rainY: 0.32, rainZ: -2.12,
     wheelY: 0.68, wheelZ: 0.25, tcamY: 1.07, tcamZ: -0.32, noseCamY: 0.62, noseCamZ: 1.7
   };
@@ -840,6 +1049,10 @@ function classicGeometry(P) {
   for (const s of [1, -1]) P.metal.push(new THREE.BoxGeometry(0.08, 0.05, 0.03).translate(s * 0.33, 0.74, 0.32));
   return {
     wheels: [{ x: 0.72, z: fa, front: true }, { x: -0.72, z: fa, front: true }, { x: 0.72, z: ra, front: false }, { x: -0.72, z: ra, front: false }],
+    decals: [
+      { kind: 'flank', tex: 'domain', z0: -0.62, z1: 0.55, yc: 0.45, yMin: 0.2, yMax: 0.72, xMin: 0.15, minN: 0.5, paintOnly: true },
+      { kind: 'eye', tex: 'logo', centre: [0, 0.69, 0.95], width: 0.26, box: [-0.36, 0.4, 0.36, 0.36, 0.76, 1.96], paintOnly: true }
+    ],
     helmetY: 0.9, helmetZ: -0.15, flap: null, rainY: 0, rainZ: 0,
     wheelY: 0.74, wheelZ: 0.12, tcamY: 1.1, tcamZ: -0.3, noseCamY: 0.58, noseCamZ: 1.6
   };

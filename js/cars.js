@@ -1,3 +1,5 @@
+import { BRAND } from './brand.js';
+
 // Car line-up: physics, engine sound and look for each choice in the picker.
 // Power in watts, mass in kg (car + driver + some fuel), aero areas in m².
 
@@ -37,19 +39,20 @@ const CLASSIC = {
   specLine: '3.0 V8 · 410 hp · 560 kg'
 };
 
-// Liveries: base, accent, third colour and a pattern the shader understands
+// Liveries in the sponsor's colours (see brand.js): base, accent, third colour and a pattern the shader understands
+const { navy, accent, white, accent2, accentName } = BRAND;
 export const CARS = [
-  { id: 'kigali', name: 'Kigali', ...MODERN, livery: { base: '#00a1de', accent: '#fad201', third: '#20603d', pattern: 'flag', number: 26 },
-    blurb: 'Sky blue, sun yellow and hill green.' },
-  { id: 'imigongo', name: 'Imigongo', ...MODERN, livery: { base: '#f3eee6', accent: '#141414', third: '#a3462b', pattern: 'zigzag', number: 7 },
-    blurb: 'Black, white and clay red, after Rwandan Imigongo art.' },
-  { id: 'nyiragongo', name: 'Volcano', ...MODERN, livery: { base: '#111214', accent: '#ff4b14', third: '#ffb000', pattern: 'lava', number: 33 },
-    blurb: 'Matt black with molten orange.' },
-  { id: 'kivu', name: 'Kivu', ...MODERN, livery: { base: '#0c2a4a', accent: '#e8c46a', third: '#3fc4c9', pattern: 'wave', number: 12 },
-    blurb: 'Deep lake blue with gold.' },
-  { id: 'v10', name: 'Scream', ...V10, livery: { base: '#c8102e', accent: '#ffffff', third: '#111111', pattern: 'classic', number: 1 },
+  { id: 'kigali', name: 'Kigali', ...MODERN, livery: { base: navy, accent, third: white, pattern: 'flag', number: 26 },
+    blurb: `Navy and white with a ${accentName} stripe.` },
+  { id: 'imigongo', name: 'Imigongo', ...MODERN, livery: { base: white, accent: navy, third: accent, pattern: 'zigzag', number: 7 },
+    blurb: 'Navy and white zigzags, after Rwandan Imigongo art.' },
+  { id: 'nyiragongo', name: 'Volcano', ...MODERN, livery: { base: navy, accent, third: accent2, pattern: 'lava', number: 33 },
+    blurb: `Navy with molten ${accentName} cracks.` },
+  { id: 'kivu', name: 'Kivu', ...MODERN, livery: { base: navy, accent, third: white, pattern: 'wave', number: 12 },
+    blurb: `Navy with a ${accentName} wave, after the lake.` },
+  { id: 'v10', name: 'Scream', ...V10, livery: { base: navy, accent, third: '#12161d', pattern: 'classic', number: 1 },
     blurb: '19,000 rpm, no halo, grooved tyres.' },
-  { id: 'classic', name: 'Heritage', ...CLASSIC, livery: { base: '#0f4d2c', accent: '#f2c100', third: '#e8e2d0', pattern: 'band', number: 5 },
+  { id: 'classic', name: 'Heritage', ...CLASSIC, livery: { base: navy, accent, third: white, pattern: 'band', number: 5 },
     blurb: 'No wings, skinny tyres, a lot of courage.' }
 ];
 

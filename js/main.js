@@ -19,6 +19,7 @@ import { Sound } from './audio.js';
 import { Hud } from './hud.js';
 import { Assists, LEVELS, LEVEL_ORDER } from './assists.js';
 import { buildChevrons } from './chevrons.js';
+import { loadBrand } from './brand.js';
 
 const $ = (id) => document.getElementById(id);
 const nextFrame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
@@ -78,6 +79,7 @@ async function boot() {
   app.scene = scene; app.camera = camera;
 
   await status('Tracing the circuit', 0.08);
+  const brandReady = loadBrand();
   const track = new Track();
   app.track = track;
   app.trackFwd = track;
@@ -102,6 +104,7 @@ async function boot() {
   scene.add(buildLake(atmo.U));
   await status('Building the stands and paddock', 0.62);
   const tvSpots = placeTvCameras(track, terrain);
+  await brandReady;
   const scenery = buildScenery(track, terrain, atmo.U, tvSpots);
   scene.add(scenery.group);
   app.startLights = scenery.startLights;

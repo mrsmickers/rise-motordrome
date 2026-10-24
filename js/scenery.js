@@ -1,8 +1,9 @@
 import * as THREE from 'three/webgpu';
 import {
   Fn, positionLocal, positionWorld, normalLocal, vec2, vec3, vec4, float, mix, smoothstep, step, abs, fract, floor, max, min,
-  mx_noise_float, mx_cell_noise_float, uniform, sin, cos, atan, clamp, time, select, instanceIndex, hash, uv, length, attribute
+  mx_noise_float, mx_cell_noise_float, uniform, sin, cos, atan, clamp, time, select, instanceIndex, hash, uv, length, attribute, texture
 } from 'three/tsl';
+import { BRAND, brandTexture } from './brand.js';
 import { lakeSdf } from './terrain.js';
 import { LAKE_LEVEL } from './track.js';
 
@@ -23,6 +24,18 @@ function std(opts = {}) {
   return m;
 }
 
+// Sponsor sign material: the brand texture, lit from the front at night
+const signMats = {};
+function signMaterial(key, U) {
+  if (signMats[key]) return signMats[key];
+  const tex = brandTexture(key);
+  if (!tex) return null;
+  const m = std({ map: tex, roughness: 0.55 });
+  m.emissiveNode = texture(tex, uv()).rgb.mul(U.night.mul(0.55));
+  signMats[key] = m;
+  return m;
+}
+
 export function buildScenery(track, terrain, U, tvSpots = []) {
   const group = new THREE.Group();
   group.name = 'scenery';
@@ -31,9 +44,12 @@ export function buildScenery(track, terrain, U, tvSpots = []) {
   buildPitBuilding(ctx);
   buildPaddock(ctx);
   ctx.startLights = buildStartGantry(ctx);
-  buildBridge(ctx);
+  // two footbridges: after the final hairpin, and on the crest before Turn 8
+  buildBridge(ctx, track.wrap(track.startLine - 135), 4, 0.18);
+  buildBridge(ctx, 2760, 0, -0.1);
   ctx.poles = buildFloodlights(ctx);
   buildBoards(ctx);
+  buildWallBoards(ctx);
   buildLakeside(ctx);
   buildMarshalPosts(ctx);
   buildAirport(ctx);
@@ -143,7 +159,7 @@ function puffyRoof(len, wid, lobes) {
 }
 
 // ---------- pit building ----------
-function buildPitBuilding({ track, U, group }) {
+function buildPitBuilding({ track, terrain, U, group }) {
   const len = 360, depth = 20, height = 15;
   const sMid = track.wrap(track.startLine + 10);
   const f = track.frame(sMid, tmpF);
@@ -189,6 +205,19 @@ function buildPitBuilding({ track, U, group }) {
   slab.matrix.multiplyMatrices(m, new THREE.Matrix4().makeTranslation(-3.5, height + 0.4, 0));
   slab.castShadow = true;
   group.add(slab);
+  // sponsor sign on the roof edge, facing the pit straight (local -x)
+  const signMat = signMaterial('banner', U);
+  if (signMat) {
+    const w = 32, h = w / BRAND.aspect.banner;
+    const sign = new THREE.Mesh(new THREE.PlaneGeometry(w, h), signMat);
+    sign.matrixAutoUpdate = false;
+    sign.matrix.multiplyMatrices(m, new THREE.Matrix4().makeTranslation(-17.4, height + 0.8 + 0.25 + h / 2, 0).multiply(new THREE.Matrix4().makeRotationY(-Math.PI / 2)));
+    const back = new THREE.Mesh(new THREE.BoxGeometry(0.25, h + 0.2, w + 0.3), std({ color: 0x1c2026, roughness: 0.5, metalness: 0.5 }));
+    back.matrixAutoUpdate = false;
+    back.matrix.multiplyMatrices(m, new THREE.Matrix4().makeTranslation(-17.25, height + 0.8 + 0.25 + h / 2, 0));
+    back.castShadow = true;
+    group.add(sign, back);
+  }
 }
 
 // ---------- paddock: cone tower and round pavilions ----------
@@ -316,14 +345,13 @@ function buildStartGantry({ track, U, group }) {
   return lights;
 }
 
-// ---------- bridge over the track after the final hairpin ----------
-function buildBridge({ track, terrain, group }) {
-  const s = track.wrap(track.startLine - 135);
+// ---------- footbridges, with the sponsor's banner on both faces ----------
+function buildBridge({ track, terrain, U, group }, s, dOff, yaw) {
   const f = track.frame(s, tmpF);
   const e = f.half;
   const span = 2 * e + 70;
   const y = f.y + 7.5;
-  const m = trackMatrix(track, s, 4, y, 0.18);
+  const m = trackMatrix(track, s, dOff, y, yaw);
   const conc = std({ color: 0xcfcac0, roughness: 0.8 });
   const g = new THREE.Group();
   g.matrixAutoUpdate = false; g.matrix.copy(m);
@@ -335,10 +363,26 @@ function buildBridge({ track, terrain, group }) {
     rail.position.set(0, 1.0, zz);
     g.add(rail);
   }
+  // piers reach down to the ground on each side
+  const p = new THREE.Vector3();
   for (const xx of [-(e + 14), e + 20]) {
-    const pier = new THREE.Mesh(new THREE.BoxGeometry(2.2, 14, 4), conc);
-    pier.position.set(xx, -7.4, 0);
+    p.set(xx, 0, 0).applyMatrix4(m);
+    const h = y - terrain.heightAt(p.x, p.z) + 0.6;
+    const pier = new THREE.Mesh(new THREE.BoxGeometry(2.2, h, 4), conc);
+    pier.position.set(xx, -0.4 - h / 2, 0);
     g.add(pier);
+  }
+  // banner centred over the track, readable in both directions
+  const mat = signMaterial('banner', U);
+  if (mat) {
+    const w = 36, h = w / BRAND.aspect.banner;
+    for (const zz of [3.56, -3.56]) {
+      const b = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat);
+      b.position.set(-dOff, 0.8, zz);
+      b.rotation.y = zz > 0 ? 0 : Math.PI;
+      b.name = 'sponsor-banner';
+      g.add(b);
+    }
   }
   g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
   group.add(g);
@@ -427,6 +471,48 @@ function buildBoards({ track, terrain, U, group }) {
     b.matrix.copy(trackMatrix(track, s, d, track.heightAt(s, d, f), Math.PI));
     group.add(b);
   }
+}
+
+// ---------- sponsor boards along the wall: main straight, Turn 1 and the Turn 8 hairpin ----------
+// H is the board height: taller where the wall stands far back across a run-off
+const WALL_RUNS = [
+  { s0: 180, s1: 420, side: -1, H: 1.0 }, // in front of the grandstands
+  { s0: 480, s1: 720, side: -1, H: 2.4 }, // outside of Turn 1
+  { s0: 3060, s1: 3250, side: -1, H: 2.4 } // outside of the hairpin
+];
+function buildWallBoards({ track, U, group }) {
+  const mat = signMaterial('barrier', U);
+  if (!mat) return;
+  const pos = [], uvs = [], idx = [];
+  const f = {};
+  for (const run of WALL_RUNS) {
+    const H = run.H, tile = H * BRAND.aspect.barrier;
+    const base = pos.length / 3;
+    let k = 0;
+    for (let s = run.s0; s <= run.s1 + 0.01; s += 1.5, k++) {
+      const fr = track.frame(track.wrap(s), f);
+      const wall = run.side > 0 ? track.wallL[fr.i] : track.wallR[fr.i];
+      const d = run.side * (wall - 0.03);
+      const x = fr.x + fr.lx * d, z = fr.z + fr.lz * d, y = track.heightAt(track.wrap(s), d, fr);
+      // reads left to right for someone facing the wall from the track
+      const u = (run.side > 0 ? s - run.s0 : run.s1 - s) / tile;
+      pos.push(x, y + 0.1, z, x, y + 0.1 + H, z);
+      uvs.push(u, 0, u, 1);
+      if (k > 0) {
+        const a = base + (k - 1) * 2, b = a + 1, c = a + 2, e = a + 3;
+        if (run.side > 0) idx.push(a, c, b, b, c, e); else idx.push(a, b, c, b, e, c);
+      }
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geo.setIndex(idx);
+  geo.computeVertexNormals();
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.name = 'sponsor-wall';
+  mesh.receiveShadow = true;
+  group.add(mesh);
 }
 
 // ---------- lakeside hospitality pods and jetties ----------
