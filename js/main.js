@@ -408,7 +408,7 @@ async function start(hotlap) {
   app.rig.cinematic = false;
   app.mode = 'drive';
   app.hud.resetLap();
-  app.rig.set(2); // cockpit
+  app.rig.set(0); // chase
   setAutopilot(hotlap);
   restartRun(hotlap);
   app.hud.hint(app.assists.level === 'beginner'
@@ -418,7 +418,7 @@ async function start(hotlap) {
 }
 
 // opts.title: seconds of title card first; opts.green: lights turn green rather than go out.
-// The lights are the ones on the start gantry over the track; the cockpit camera looks up at them.
+// The lights are the ones on the start gantry over the track; the camera tilts up to them.
 function beginStartLights(opts = {}) {
   const title = opts.title || 0;
   app.startPhase = { t: -title, title, out: 3.2 + 0.6 + Math.random() * 1.6, green: !!opts.green };

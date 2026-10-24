@@ -49,6 +49,7 @@ export class CameraRig {
     this.yaw = 0; this.pitch = 0; this.zoom = 1;
     this.lastInput = -10;
     this.smoothPos = new THREE.Vector3();
+    this.smoothOff = new THREE.Vector3();
     this.smoothLook = new THREE.Vector3();
     this.first = true;
     this.shakeT = 0;
@@ -141,20 +142,22 @@ export class CameraRig {
     let fov = 60;
     const id = this.cinematic ? this._cinematicId(veh) : this.id;
     if (id === 'chase') {
-      const dist = 7.2 * this.zoom, height = 2.0 * Math.sqrt(this.zoom);
+      // high enough to see the top of the car and its branding
+      const dist = 7.2 * this.zoom, height = 2.6 * Math.sqrt(this.zoom);
       const fwd = _v.copy(pose.forwardFlat);
       const yaw = this.yaw, cs = Math.cos(yaw), sn = Math.sin(yaw);
       const back = new THREE.Vector3(-(fwd.x * cs - fwd.z * sn), 0, -(fwd.x * sn + fwd.z * cs));
       const desired = pose.pos.clone().addScaledVector(back, dist * Math.cos(this.pitch * 0.6)).add(new THREE.Vector3(0, height + Math.sin(Math.max(0, this.pitch)) * dist * 0.8, 0));
       this._clampAboveGround(desired, 0.5);
-      if (this.first) { this.smoothPos.copy(desired); this.first = false; }
-      const k = 1 - Math.exp(-dt * 9);
-      this.smoothPos.lerp(desired, k);
-      // keep the distance honest at speed
-      const off = this.smoothPos.clone().sub(pose.pos);
-      const len = off.length();
-      if (len > dist * 1.6) this.smoothPos.copy(pose.pos).addScaledVector(off, (dist * 1.6) / len);
-      const look = pose.pos.clone().addScaledVector(pose.forwardFlat, 4).add(new THREE.Vector3(0, 0.9, 0));
+      // smooth the offset from the car rather than the position, so speed does not pull the camera back
+      const want = desired.sub(pose.pos);
+      if (this.first) { this.smoothOff.copy(want); this.first = false; }
+      this.smoothOff.lerp(want, 1 - Math.exp(-dt * 8));
+      this.smoothPos.copy(pose.pos).add(this.smoothOff);
+      this._clampAboveGround(this.smoothPos, 0.5);
+      // tilts up to the start gantry while the lights run
+      this._look += (this.lookUp - this._look) * Math.min(1, dt * 3);
+      const look = pose.pos.clone().addScaledVector(pose.forwardFlat, 4).add(new THREE.Vector3(0, 0.9 + this._look * 1.5, 0));
       cam.position.copy(this.smoothPos);
       cam.up.set(0, 1, 0);
       cam.lookAt(look);
