@@ -191,7 +191,8 @@ function treeMaterial(kind, U, atlas) {
 }
 
 // tvSpots: [{x, z}] kept clear so broadcast cameras see the track
-export function buildVegetation(track, terrain, U, tvSpots = []) {
+// clear(x, z) returns true for ground kept open, such as the glades where the herds graze
+export function buildVegetation(track, terrain, U, tvSpots = [], clear = null) {
   const group = new THREE.Group();
   group.name = 'vegetation';
   const atlas = leafAtlas();
@@ -249,7 +250,9 @@ export function buildVegetation(track, terrain, U, tvSpots = []) {
       else if (savanna > 0.5) kind = r < 0.62 ? 'acacia' : r < 0.82 ? 'shrub' : 'broadleaf';
       else if (fbm(x / 160, z / 160, 2, 91) > 0.32) kind = 'eucalyptus';
       else kind = r < 0.35 ? 'acacia' : r < 0.75 ? 'broadleaf' : 'shrub';
-      lists[kind][info.dist < 140 ? 'near' : 'far'].push({ x, z, s: 0.7 + rnd() * 0.65 });
+      const tree = { x, z, s: 0.7 + rnd() * 0.65 };
+      if (clear && clear(x, z)) continue;
+      lists[kind][info.dist < 140 ? 'near' : 'far'].push(tree);
     }
   }
   // papyrus on the lake islands

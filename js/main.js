@@ -20,6 +20,7 @@ import { Hud } from './hud.js';
 import { Assists, LEVELS, LEVEL_ORDER } from './assists.js';
 import { buildChevrons } from './chevrons.js';
 import { loadBrand } from './brand.js';
+import { buildAnimals, planHerds } from './animals.js';
 
 const $ = (id) => document.getElementById(id);
 const nextFrame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
@@ -109,8 +110,12 @@ async function boot() {
   scene.add(scenery.group);
   app.startLights = scenery.startLights;
   await status('Planting acacias and papyrus', 0.7);
-  const veg = buildVegetation(track, terrain, atmo.U, tvSpots);
+  const herds = planHerds(track, terrain);
+  const veg = buildVegetation(track, terrain, atmo.U, tvSpots, herds.clear);
   scene.add(veg);
+  await status('Bringing in the giraffes and elephants', 0.74);
+  app.animals = buildAnimals(track, terrain, herds);
+  scene.add(app.animals.group);
   app.assists = new Assists();
   try { const saved = localStorage.getItem('agp-assists'); if (LEVELS[saved]) app.assists.level = saved; } catch { /* storage may be blocked */ }
   rebuildChevrons();
@@ -555,6 +560,7 @@ function listenerFor() {
 function frame(dt) {
   const v = app.vehicle;
   app.simTime += dt;
+  app.animals?.update(dt);
   const inp = app.input.poll();
   if (app.mode === 'drive') {
     if (app.autopilot && inp.active && !app.startPhase) setAutopilot(false);

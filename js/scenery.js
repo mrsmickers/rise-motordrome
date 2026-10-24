@@ -4,6 +4,7 @@ import {
   mx_noise_float, mx_cell_noise_float, uniform, sin, cos, atan, clamp, time, select, instanceIndex, hash, uv, length, attribute, texture
 } from 'three/tsl';
 import { BRAND, brandTexture } from './brand.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { lakeSdf } from './terrain.js';
 import { LAKE_LEVEL } from './track.js';
 
@@ -439,39 +440,76 @@ function numberTexture(text, bg = '#f4f4f0', fg = '#111') {
 
 function buildBoards({ track, terrain, U, group }) {
   const heavy = [1, 3, 4, 8, 12, 14, 17];
-  const boardGeo = new THREE.BoxGeometry(1.6, 1.6, 0.12);
-  boardGeo.translate(0, 1.6, 0);
+  const steel = std({ color: 0x9aa0a6, roughness: 0.45, metalness: 0.7 });
+  const back = std({ color: 0xd8d8d4, roughness: 0.7 });
+  const m = new THREE.Matrix4(), f = {};
+  // ground under a point beside the track: the verge is part of the track surface, beyond the wall it is terrain
+  const groundAt = (s, d, fr) => {
+    const x = fr.x + fr.lx * d, z = fr.z + fr.lz * d;
+    return Math.max(track.heightAt(s, d, fr), terrain.heightAt(x, z));
+  };
+  // Braking boards: 3, 2 and 1 hundred metres out, on two legs on the verge, numbers facing the approach.
+  const W = 1.1, H = 1.45, foot = 0.35;
+  const boardGeo = new THREE.BoxGeometry(W, H, 0.08);
+  boardGeo.translate(0, foot + H / 2, 0);
+  // legs run from the top of the board into the ground, a little buried so they meet a sloping verge
+  const legLen = foot + H + 0.4;
+  const legGeo = mergeGeometries([-0.38, 0.38].map((x) => new THREE.BoxGeometry(0.07, legLen, 0.07).translate(x, legLen / 2 - 0.4, -0.075)));
+  const legs = [];
   for (const n of [3, 2, 1]) {
-    const mat = std({ map: numberTexture(String(n)), roughness: 0.6 });
-    mat.emissiveNode = vec3(0.8).mul(U.night);
+    const face = std({ map: numberTexture(String(n)), roughness: 0.6 });
+    face.emissiveNode = vec3(0.8).mul(U.night);
     const list = [];
     for (const c of track.corners) {
       if (!heavy.includes(c.n)) continue;
       const s = track.wrap(c.s - 70 - n * 100);
-      const f = track.frame(s, tmpF);
+      const fr = track.frame(s, f);
       // boards stand on the outside of the approach
       const side = c.dir === 'L' ? -1 : 1;
-      const d = side * (f.half + 3.5);
-      list.push(trackMatrix(track, s, d, track.heightAt(s, d, f), Math.PI));
+      const d = side * (fr.half + 3.5);
+      const mm = trackMatrix(track, s, d, track.heightAt(s, d, fr), Math.PI);
+      list.push(mm);
+      legs.push(mm);
     }
-    const im = new THREE.InstancedMesh(boardGeo, mat, list.length);
-    list.forEach((m, i) => im.setMatrixAt(i, m));
+    // box faces: +x, -x, top, bottom, front (towards the approach), back
+    const im = new THREE.InstancedMesh(boardGeo, [back, back, back, back, face, back], list.length);
+    list.forEach((mm, i) => im.setMatrixAt(i, mm));
+    im.castShadow = true;
     group.add(im);
   }
+  const legMesh = new THREE.InstancedMesh(legGeo, steel, legs.length);
+  legs.forEach((mm, i) => legMesh.setMatrixAt(i, mm));
+  legMesh.castShadow = true;
+  group.add(legMesh);
+  // Corner numbers: yellow boards on a post behind the wall, high enough to clear the wall boards
+  const cW = 2.2, cFoot = 2.9;
+  const cGeo = new THREE.BoxGeometry(cW, cW, 0.12);
+  cGeo.translate(0, cFoot + cW / 2, 0);
+  const posts = [];
   for (const c of track.corners) {
     const s = track.wrap(c.s - 25);
-    const f = track.frame(s, tmpF);
+    const fr = track.frame(s, f);
     const side = c.dir === 'L' ? -1 : 1;
-    const wall = side > 0 ? track.wallL[f.i] : track.wallR[f.i];
+    const wall = side > 0 ? track.wallL[fr.i] : track.wallR[fr.i];
     const d = side * (wall + 1.5);
-    const mat = std({ map: numberTexture(String(c.n), '#fad201', '#111'), roughness: 0.6 });
-    mat.emissiveNode = vec3(0.6).mul(U.night);
-    const b = new THREE.Mesh(new THREE.BoxGeometry(2.6, 2.6, 0.15), mat);
-    b.geometry.translate(0, 3.2, 0);
+    const ground = groundAt(s, d, fr);
+    const face = std({ map: numberTexture(String(c.n), '#fad201', '#111'), roughness: 0.6 });
+    face.emissiveNode = vec3(0.6).mul(U.night);
+    const b = new THREE.Mesh(cGeo, [back, back, back, back, face, back]);
     b.matrixAutoUpdate = false;
-    b.matrix.copy(trackMatrix(track, s, d, track.heightAt(s, d, f), Math.PI));
+    m.copy(trackMatrix(track, s, d, ground, Math.PI));
+    b.matrix.copy(m);
+    b.castShadow = true;
     group.add(b);
+    posts.push(m.clone());
   }
+  const postLen = cFoot + cW * 0.8 + 0.5;
+  const postGeo = new THREE.BoxGeometry(0.14, postLen, 0.14);
+  postGeo.translate(0, postLen / 2 - 0.5, -0.13);
+  const postMesh = new THREE.InstancedMesh(postGeo, steel, posts.length);
+  posts.forEach((mm, i) => postMesh.setMatrixAt(i, mm));
+  postMesh.castShadow = true;
+  group.add(postMesh);
 }
 
 // ---------- sponsor boards along the walls: both sides of the start/finish straight and every heavy braking zone ----------

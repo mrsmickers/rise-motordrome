@@ -321,12 +321,16 @@ export class Vehicle {
       const dLine = tr.lineOffset(this.s);
       const dAhead = tr.lineOffset(this.s + Math.max(8, this.v * 0.35));
       const dTarget = dLine + (dAhead - dLine) * 0.15;
-      this.d += clamp(dTarget - this.d, -1, 1) * Math.min(1, h * 2.5);
+      // steer onto the line: aim the car's heading at it, and move sideways only by driving along that heading
       const lineSlope = (tr.lineOffset(this.s + 2) - tr.lineOffset(this.s - 2)) / 4;
-      const psiT = Math.atan(lineSlope * (1 - f.kL * this.d));
-      const psi0 = this.psi;
-      this.psi += (psiT - this.psi) * Math.min(1, h * 12);
       const denom = Math.max(0.2, 1 - f.kL * this.d);
+      const look = Math.max(22, this.v * 0.7);
+      const psiT = Math.atan(lineSlope / denom) + Math.atan2(dTarget - this.d, look);
+      const psi0 = this.psi;
+      // a car can only turn as it rolls: no faster than a tight hairpin's curvature allows at this speed
+      const turn = (psiT - this.psi) * Math.min(1, h * 12), maxTurn = (this.v * h) / 7 + 1e-6;
+      this.psi += clamp(turn, -maxTurn, maxTurn);
+      this.d += this.v * Math.sin(this.psi) * h;
       const sdot = (this.v * Math.cos(this.psi)) / denom;
       const sPrev = this.s;
       this.s = tr.wrap(this.s + sdot * h);
@@ -335,7 +339,9 @@ export class Vehicle {
       this.r = (this.psi - psi0) / h + f.kL * sdot;
       this.latAcc = this.v * this.v * kLine;
       this.vertAcc = this.v * this.v * f.vcurv;
-      this.steer = clamp((kLine * car.wheelbase) / 0.36 * 1.4, -1, 1);
+      // wheel angle from the path the car is actually taking, so it turns while it moves across
+      const steerT = clamp(((this.r / Math.max(this.v, 3)) * car.wheelbase) / 0.36 * 1.4, -1, 1);
+      this.steer += (steerT - this.steer) * Math.min(1, h * 10);
       // pedals and gears as a driver would use them
       this.throttle = acc > 0.5 ? clamp(0.55 + acc / 20, 0, 1) : acc > -2 ? 0.25 : 0;
       this.brake = acc < -6 ? clamp(-acc / 45, 0, 1) : 0;
