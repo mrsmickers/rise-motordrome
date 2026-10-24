@@ -96,7 +96,7 @@ async function boot() {
   scene.add(terrain.buildMeshes(atmo.U));
   await status('Paving 6 km of asphalt', 0.5);
   scene.add(buildTrackMeshes(track, atmo.U));
-  await status('Filling Lake Kidogo', 0.56);
+  await status('Filling the lake', 0.56);
   scene.add(buildLake(atmo.U));
   await status('Building the stands and paddock', 0.62);
   const tvSpots = placeTvCameras(track, terrain);

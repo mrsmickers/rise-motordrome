@@ -6,7 +6,7 @@ import {
 import { fbm, ridged, smoothstep as sstep, clamp as cl, lerp } from './noise.js';
 import { LAKE_LEVEL } from './track.js';
 
-// Lake Kidogo, west of the lakeside esses (world metres)
+// The lake, west of the lakeside esses (world metres)
 export const LAKE_BLOBS = [
   [-470, -60, 125], [-560, -40, 150], [-780, -100, 300], [-1100, 200, 420], [-1250, -350, 380],
   [-900, 520, 230], [-1500, 100, 500], [-650, -300, 150], [-1700, -600, 520], [-1450, 700, 380]
@@ -25,7 +25,7 @@ export function lakeSdf(x, z) {
   return res + fbm(x * 0.012, z * 0.012, 3, 91) * 45;
 }
 
-// Floating papyrus islands in the shallows, as in the renders of Lake Kidogo
+// Floating papyrus islands in the shallows, as in the renders of the lake
 let _islands = null;
 export function lakeIslands() {
   if (_islands) return _islands;

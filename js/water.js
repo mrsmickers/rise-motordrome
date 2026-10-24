@@ -6,7 +6,7 @@ import {
 import { LAKE_BLOBS, lakeIslands } from './terrain.js';
 import { LAKE_LEVEL } from './track.js';
 
-// Lake Kidogo: planar reflection, wind ripples and a sun glint
+// The lake: planar reflection, wind ripples and a sun glint
 export function buildLake(U) {
   let minX = 1e9, maxX = -1e9, minZ = 1e9, maxZ = -1e9;
   for (const [x, z, r] of LAKE_BLOBS) {
