@@ -290,7 +290,6 @@ function returnToMenu() {
   app.startPhase = null;
   clearTimeout(app.lightsTimer);
   $('title-card').hidden = true;
-  $('start-lights').hidden = true;
   app.startLights.forEach((u) => (u.value = 0));
   app.startLights.green.value = 0;
   for (const p of document.querySelectorAll(':popover-open')) p.hidePopover();
@@ -338,7 +337,8 @@ function setDirection(rev, restart) {
 function restartRun(hotlap) {
   const tr = app.track, v = app.vehicle;
   app.hud.resetLap();
-  v.reset(tr.wrap(tr.startLine - 9), 2.6);
+  // pole sits 13 m short of the gantry in either direction (the gantry is 4 m past the anticlockwise line)
+  v.reset(tr.wrap(tr.startLine - (tr.reversed ? 17 : 9)), 2.6);
   beginStartLights(hotlap ? { title: 3.2, green: true } : {});
 }
 
@@ -372,16 +372,16 @@ async function start(hotlap) {
   setTimeout(() => app.hud.hint(''), 9000);
 }
 
-// opts.title: seconds of title card first; opts.green: lights turn green rather than go out
+// opts.title: seconds of title card first; opts.green: lights turn green rather than go out.
+// The lights are the ones on the start gantry over the track; the cockpit camera looks up at them.
 function beginStartLights(opts = {}) {
   const title = opts.title || 0;
   app.startPhase = { t: -title, title, out: 3.2 + 0.6 + Math.random() * 1.6, green: !!opts.green };
   clearTimeout(app.lightsTimer);
-  const lights = $('start-lights'), card = $('title-card');
-  lights.classList.remove('fade');
-  for (const s of lights.children) s.classList.remove('on', 'go');
+  app.startLights.forEach((u) => (u.value = 0));
   app.startLights.green.value = 0;
-  lights.hidden = title > 0;
+  app.rig.lookUp = 1;
+  const card = $('title-card');
   card.hidden = !(title > 0);
   card.classList.remove('show');
   if (title > 0) requestAnimationFrame(() => card.classList.add('show'));
@@ -391,29 +391,20 @@ function updateStartLights(dt) {
   const sp = app.startPhase;
   if (!sp) return;
   sp.t += dt;
-  const lights = $('start-lights'), card = $('title-card');
+  const card = $('title-card');
   if (sp.t < 0) {
     if (sp.t > -0.55) card.classList.remove('show');
     return;
   }
-  if (!card.hidden) { card.hidden = true; lights.hidden = false; }
+  card.hidden = true;
   const lit = Math.min(5, Math.floor(sp.t / 0.8) + 1);
   const out = sp.t >= sp.out;
-  const spans = lights.children;
-  for (let i = 0; i < 5; i++) {
-    const on = !out && i < lit;
-    spans[i].classList.toggle('on', on);
-    spans[i].classList.toggle('go', out && sp.green);
-    app.startLights[i].value = on ? 1 : 0;
-  }
+  for (let i = 0; i < 5; i++) app.startLights[i].value = !out && i < lit ? 1 : 0;
   app.startLights.green.value = out && sp.green ? 1 : 0;
   if (out) {
     app.startPhase = null;
-    const keep = sp.green ? 1600 : 900;
-    app.lightsTimer = setTimeout(() => {
-      lights.classList.add('fade');
-      app.lightsTimer = setTimeout(() => { lights.hidden = true; lights.classList.remove('fade'); app.startLights.green.value = 0; }, 650);
-    }, keep);
+    app.lightsTimer = setTimeout(() => { app.startLights.green.value = 0; }, 2500);
+    setTimeout(() => { app.rig.lookUp = 0; }, 400);
   }
 }
 

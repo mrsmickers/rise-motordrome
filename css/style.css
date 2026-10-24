@@ -83,7 +83,7 @@ kbd { font-family: var(--font-cond); font-size: 11px; padding: 1px 5px; border: 
 /* HUD shell */
 .hud { position: fixed; inset: 0; z-index: 10; pointer-events: none; }
 .hud[hidden] { display: none; }
-.hud.clean > *:not(#start-lights):not(#title-card):not(#touch):not(#btn-show) { opacity: 0; pointer-events: none !important; }
+.hud.clean > *:not(#title-card):not(#touch):not(#btn-show) { opacity: 0; pointer-events: none !important; }
 .show-hud { display: none; position: absolute; top: var(--gutter); right: var(--gutter); width: 42px; height: 42px; place-items: center; border-radius: 12px; border: 1px solid var(--line);
   background: var(--glass); color: var(--text); cursor: pointer; pointer-events: auto; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
 .hud.clean .show-hud { display: grid; }
@@ -178,13 +178,6 @@ body.touch-ui .menu-btn { height: 32px; margin-top: 7px; }
   font: 600 15px/1 var(--font-cond); letter-spacing: 0.06em; text-transform: uppercase; }
 .cam-current:hover { background: rgba(255, 255, 255, 0.12); }
 
-/* Start lights */
-.start-lights { position: absolute; top: 18%; left: 50%; transform: translateX(-50%); display: flex; gap: 14px; padding: 16px 20px; border-radius: 16px; background: rgba(8, 10, 14, 0.85); border: 1px solid var(--line); }
-.start-lights[hidden] { display: none; }
-.start-lights span { width: 44px; height: 44px; border-radius: 50%; background: #2a0d0d; box-shadow: inset 0 0 0 3px #111; transition: background 0.05s; }
-.start-lights span.on { background: radial-gradient(circle at 40% 35%, #ff8a80, #ff1a1a 45%, #a00000); box-shadow: 0 0 26px rgba(255, 30, 30, 0.85), inset 0 0 0 3px #111; }
-.start-lights span.go { background: radial-gradient(circle at 40% 35%, #b9ffcf, #22e06b 45%, #0a7a35); box-shadow: 0 0 28px rgba(34, 224, 107, 0.9), inset 0 0 0 3px #111; }
-.start-lights.fade { opacity: 0; transition: opacity 0.6s ease; }
 
 /* Title card before the start */
 .title-card { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -58%); width: min(620px, calc(100vw - 32px)); padding: 26px 30px 24px; text-align: center;
@@ -282,8 +275,6 @@ body.touch-ui .hud-bc { display: none; }
   body.touch-ui .hud-tr .seg-btn { padding: 0 7px; }
   body.touch-ui .hud-tr .tool-btn.icon-only, body.touch-ui .hud-tr .tool-btn { width: 32px; padding: 0; justify-content: center; }
   body.touch-ui #btn-full { display: none; }
-  body.touch-ui .start-lights { top: 30%; gap: 8px; padding: 10px 12px; }
-  body.touch-ui .start-lights span { width: 30px; height: 30px; }
 }
 @media (pointer: coarse) and (orientation: landscape) {
   body.touch-ui .hud-tl { padding: 8px 11px 7px; min-width: 0; width: 168px; }
@@ -303,8 +294,6 @@ body.touch-ui .hud-bc { display: none; }
   body.touch-ui .camera-switch { margin-top: 6px; padding-top: 6px; }
   body.touch-ui .touch { height: 60%; }
   body.touch-ui .touch-pedal { width: 76px; height: 96px; }
-  body.touch-ui .start-lights { top: 14%; gap: 8px; padding: 10px 12px; }
-  body.touch-ui .start-lights span { width: 30px; height: 30px; }
 }
 
 /* Short screens: compact title card so the start buttons stay in view */

@@ -1,6 +1,6 @@
 # African Grand Prix
 
-Version 0.4 beta.
+Version 0.8 beta.
 
 A browser sim of the planned African Grand Prix circuit in Bugesera, Rwanda (interim name RISE Motordrome), built with three.js (WebGPU, with a WebGL 2 fallback). You drive or ride along in an F1 car on a 6 km, 17-turn lap with 197 m of climbing, beside a lake.
 
@@ -34,7 +34,7 @@ All paths are relative, so it works from a sub-path. The `.nojekyll` file stops 
 | `A` / `D` / `←` / `→` | Steer |
 | `Shift` | Boost |
 | `V`, `1`–`6` | Cameras: chase, T-cam, cockpit (the default), nose, TV, helicopter |
-| `P` | Hot lap autopilot on or off (any pedal or steering input takes over). "Ride a hot lap" starts from pole: title card, five red lights, then green |
+| `P` | Hot lap autopilot on or off (any pedal or steering input takes over). "Ride a hot lap" starts from pole: title card, then the gantry's five red lights turn green |
 | `R` | Back on track |
 | `T` | Time of day: dawn, day, sunset, floodlit night |
 | `C` | Reverse: run the lap clockwise (also on the title screen and the toolbar) |
@@ -42,7 +42,7 @@ All paths are relative, so it works from a sub-path. The `.nojekyll` file stops 
 | `Esc` | Back to the menu (also the Menu button, top left) |
 | Mouse drag / scroll | Look around / zoom |
 
-Gamepads work (right trigger throttle, left trigger brake, left stick steer, Y camera, X hot lap). Phones get an on-screen steering pad and pedals.
+Gamepads may work (right trigger throttle, left trigger brake, left stick steer, Y camera, X hot lap) but are untested. Phones get an on-screen steering pad and pedals.
 
 ## The cars
 

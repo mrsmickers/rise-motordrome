@@ -285,21 +285,29 @@ function buildStartGantry({ track, U, group }) {
   const lights = [];
   const green = uniform(0);
   lights.green = green;
-  const podGeo = new THREE.BoxGeometry(0.9, 1.4, 0.5);
-  const lampGeo = new THREE.CircleGeometry(0.17, 16);
+  // Lights on both faces: one set for the anticlockwise grid, one for the reverse grid. Each set lights
+  // from the driver's left to right. Local +x is the left of the anticlockwise direction of travel.
+  const podGeo = new THREE.BoxGeometry(0.9, 1.5, 1.0);
+  const lampGeo = new THREE.CircleGeometry(0.21, 20);
   for (let i = 0; i < 5; i++) {
-    const pod = new THREE.Mesh(podGeo, steel);
-    const x = (i - 2) * 1.2;
-    pod.position.set(x, 7.0, -0.2);
-    g.add(pod);
     const u = uniform(0);
     const lampMat = new THREE.MeshBasicNodeMaterial();
     lampMat.colorNode = mix(vec3(0.08, 0.01, 0.01), vec3(30, 1.2, 0.8), u).add(vec3(0.6, 22, 4).mul(green));
-    for (let r = 0; r < 2; r++) {
-      const lamp = new THREE.Mesh(lampGeo, lampMat);
-      lamp.position.set(x, 7.3 - r * 0.55, -0.46);
-      lamp.rotation.y = Math.PI;
-      g.add(lamp);
+    for (const face of [-1, 1]) {
+      // face -1 looks back down the anticlockwise grid; face +1 down the reverse grid
+      const x = face < 0 ? (2 - i) * 1.2 : (i - 2) * 1.2;
+      if (face < 0) {
+        const pod = new THREE.Mesh(podGeo, steel);
+        pod.position.set(x, 7.0, 0);
+        g.add(pod);
+      }
+      for (let r = 0; r < 2; r++) {
+        const lamp = new THREE.Mesh(lampGeo, lampMat);
+        lamp.position.set(x, 7.32 - r * 0.6, face * 0.51);
+        lamp.rotation.y = face < 0 ? Math.PI : 0;
+        lamp.userData.light = { i, face, row: r };
+        g.add(lamp);
+      }
     }
     lights.push(u);
   }

@@ -55,6 +55,8 @@ export class CameraRig {
     this.tvIndex = -1;
     this.heliAngle = 0;
     this.cinematic = false;
+    this.lookUp = 0; // 1 while waiting for the start lights: the cockpit view tilts up to the gantry
+    this._look = 0;
     this._bindPointer(dom);
     this.tvCams = placeTvCameras(track, terrain);
   }
@@ -164,7 +166,8 @@ export class CameraRig {
       // head leans with lateral load in the cockpit
       _q.copy(pose.quat).multiply(FLIP);
       const lookYaw = this.yaw + (id === 'cockpit' ? clamp(-veh.latAcc * 0.004, -0.12, 0.12) : 0);
-      const pitch = (id === 'tcam' ? -0.07 : id === 'nose' ? -0.03 : -0.13) + this.pitch * 0.5;
+      this._look += (this.lookUp - this._look) * Math.min(1, dt * 3);
+      const pitch = (id === 'tcam' ? -0.07 : id === 'nose' ? -0.03 : -0.13) + this.pitch * 0.5 + this._look * (id === 'cockpit' ? 0.2 : 0.12);
       const lq = new THREE.Quaternion().setFromEuler(new THREE.Euler(pitch, lookYaw, id === 'cockpit' ? clamp(veh.latAcc * 0.0012, -0.05, 0.05) : 0, 'YXZ'));
       _q.multiply(lq);
       cam.quaternion.copy(_q);
