@@ -1,6 +1,6 @@
 # African Grand Prix
 
-Version 0.12 beta.
+Version 0.13 beta.
 
 A browser sim of the planned African Grand Prix circuit in Bugesera, Rwanda (interim name RISE Motordrome), built with three.js (WebGPU, with a WebGL 2 fallback). You drive or ride along in an F1 car on a 6 km, 17-turn lap with 197 m of climbing, beside a lake.
 
@@ -63,7 +63,7 @@ Chevrons go yellow where you should lift and red from the point where you need t
 | Scream | 2005 | 3.0 V10, 19,000 rpm | 640 kg |
 | Heritage | 1967 | 3.0 V8, no wings | 560 kg |
 
-The cars, two bridges, the pit roof and the wall boards on the main straight, Turn 1 and the Turn 8 hairpin carry Ingenio Technologies branding. Add `?assurix` to the address (`?brand=assurix` and `?=assurix` work too) to show Assurix instead.
+The cars, two bridges, the pit roof, the walls on both sides of the start/finish straight and in every heavy braking zone (Turns 1, 3, 4, 8, 12, 14 and 17), and raised billboards past Turns 3, 8, 12 and 17 carry Ingenio Technologies branding. Add `?assurix` to the address (`?brand=assurix` and `?=assurix` work too) to show Assurix instead.
 
 Air density is set for 1,390 m above sea level (about 86% of sea level), which cuts both drag and downforce. The 2026 car runs about 1:40 on the hot lap in either direction. Reverse keeps a separate best lap.
 

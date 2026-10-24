@@ -138,6 +138,15 @@ def build(b_name, b):
     im.alpha_composite(a, ((W // 2 - a.width) // 2, (H - 16 - a.height) // 2))
     im.alpha_composite(c, (W // 2 + (W // 2 - c.width) // 2, (H - 16 - c.height) // 2))
     save(im, 'barrier.png', b_name, 'wall boards')
+    # raised billboard at the end of a corner: logo, then the line over the domain
+    W, H = 2048, 640
+    im = Image.new('RGBA', (W, H), b['navy'])
+    d = ImageDraw.Draw(im)
+    d.rectangle([0, H - 26, W, H], fill=b['accent'])
+    right = stack([line_img(b, 78 if len(b['line']) > 1 else 96), text_img(b, b['domain'], 118, b['accent'])], 48)
+    content = fit(row([logo(b, 270), right], 130), W - 200, H - 150)
+    im.alpha_composite(content, ((W - content.width) // 2, (H - 26 - content.height) // 2))
+    save(im, 'billboard.png', b_name, 'raised billboards')
 
 
 for name, b in BRANDS.items():

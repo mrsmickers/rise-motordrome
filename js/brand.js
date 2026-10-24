@@ -4,17 +4,17 @@ const BRANDS = {
   ingenio: {
     id: 'ingenio', name: 'Ingenio Technologies', domain: 'ingeniotech.co.uk',
     navy: '#222E40', accent: '#DEDC00', white: '#FFFFFF', accent2: '#F8AB08', accentName: 'yellow',
-    aspect: { domain: 7.0, domainPanel: 6.605, logo: 2.892, logoPanel: 2.819, lockup: 3.206, lockupPanel: 3.125, banner: 16, barrier: 12 }
+    aspect: { domain: 7.0, domainPanel: 6.605, logo: 2.892, logoPanel: 2.819, lockup: 3.206, lockupPanel: 3.125, banner: 16, barrier: 12, billboard: 3.2 }
   },
   assurix: {
     id: 'assurix', name: 'Assurix', domain: 'assurix.com',
     navy: '#111F46', accent: '#BED95C', white: '#FFFFFF', accent2: '#3DBB98', accentName: 'lime',
-    aspect: { domain: 5.895, domainPanel: 5.536, logo: 3.585, logoPanel: 3.444, lockup: 2.678, lockupPanel: 2.638, banner: 16, barrier: 12 }
+    aspect: { domain: 5.895, domainPanel: 5.536, logo: 3.585, logoPanel: 3.444, lockup: 2.678, lockupPanel: 2.638, banner: 16, barrier: 12, billboard: 3.2 }
   }
 };
 const FILES = {
   domain: 'domain.png', domainPanel: 'domain-panel.png', logo: 'logo.png', logoPanel: 'logo-panel.png',
-  lockup: 'lockup.png', lockupPanel: 'lockup-panel.png', banner: 'banner.png', barrier: 'barrier.png'
+  lockup: 'lockup.png', lockupPanel: 'lockup-panel.png', banner: 'banner.png', barrier: 'barrier.png', billboard: 'billboard.png'
 };
 
 function chosen() {

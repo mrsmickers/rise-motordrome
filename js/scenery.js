@@ -50,6 +50,7 @@ export function buildScenery(track, terrain, U, tvSpots = []) {
   ctx.poles = buildFloodlights(ctx);
   buildBoards(ctx);
   buildWallBoards(ctx);
+  buildBillboards(ctx);
   buildLakeside(ctx);
   buildMarshalPosts(ctx);
   buildAirport(ctx);
@@ -473,35 +474,47 @@ function buildBoards({ track, terrain, U, group }) {
   }
 }
 
-// ---------- sponsor boards along the wall: main straight, Turn 1 and the Turn 8 hairpin ----------
-// H is the board height: taller where the wall stands far back across a run-off
-const WALL_RUNS = [
-  { s0: 180, s1: 420, side: -1, H: 1.0 }, // in front of the grandstands
-  { s0: 480, s1: 720, side: -1, H: 2.4 }, // outside of Turn 1
-  { s0: 3060, s1: 3250, side: -1, H: 2.4 } // outside of the hairpin
-];
+// ---------- sponsor boards along the walls: both sides of the start/finish straight and every heavy braking zone ----------
+// On the outside of each corner, from 130 m before it to 90 m after, so they face the car as it slows.
+// Boards stand taller where the wall is far back across a run-off.
+const BRAKING_CORNERS = [1, 3, 4, 8, 12, 14, 17];
+function wallRuns(track) {
+  // start/finish straight, from the final corner to where the walls step back for Turn 1 and the pit exit
+  const runs = [{ s0: -100, s1: 400, side: -1 }, { s0: -112, s1: 355, side: 1 }];
+  for (const n of BRAKING_CORNERS) {
+    const c = track.corners.find((k) => k.n === n);
+    if (c) runs.push({ s0: c.s - 130, s1: c.s + 90, side: c.dir === 'L' ? -1 : 1 });
+  }
+  return runs;
+}
+
 function buildWallBoards({ track, U, group }) {
   const mat = signMaterial('barrier', U);
   if (!mat) return;
   const pos = [], uvs = [], idx = [];
   const f = {};
-  for (const run of WALL_RUNS) {
-    const H = run.H, tile = H * BRAND.aspect.barrier;
-    const base = pos.length / 3;
-    let k = 0;
-    for (let s = run.s0; s <= run.s1 + 0.01; s += 1.5, k++) {
+  for (const run of wallRuns(track)) {
+    let sum = 0, n = 0;
+    for (let s = run.s0; s <= run.s1; s += 10) { const fr = track.frame(track.wrap(s), f); sum += run.side > 0 ? track.wallL[fr.i] : track.wallR[fr.i]; n++; }
+    const mean = sum / n;
+    const H = mean > 25 ? 2.4 : mean > 14 ? 1.5 : 1.0, tile = H * BRAND.aspect.barrier;
+    let prev = null, last = -1;
+    for (let s = run.s0; s <= run.s1 + 0.01; s += 1.5) {
       const fr = track.frame(track.wrap(s), f);
       const wall = run.side > 0 ? track.wallL[fr.i] : track.wallR[fr.i];
       const d = run.side * (wall - 0.03);
       const x = fr.x + fr.lx * d, z = fr.z + fr.lz * d, y = track.heightAt(track.wrap(s), d, fr);
       // reads left to right for someone facing the wall from the track
       const u = (run.side > 0 ? s - run.s0 : run.s1 - s) / tile;
+      const k = pos.length / 3;
       pos.push(x, y + 0.1, z, x, y + 0.1 + H, z);
       uvs.push(u, 0, u, 1);
-      if (k > 0) {
-        const a = base + (k - 1) * 2, b = a + 1, c = a + 2, e = a + 3;
+      // where the wall steps back or forward, start a new strip rather than join across the gap
+      if (prev !== null && Math.abs(wall - prev) < 1.5 && last === k - 2) {
+        const a = k - 2, b = k - 1, c = k, e = k + 1;
         if (run.side > 0) idx.push(a, c, b, b, c, e); else idx.push(a, b, c, b, e, c);
       }
+      prev = wall; last = k;
     }
   }
   const geo = new THREE.BufferGeometry();
@@ -513,6 +526,44 @@ function buildWallBoards({ track, U, group }) {
   mesh.name = 'sponsor-wall';
   mesh.receiveShadow = true;
   group.add(mesh);
+}
+
+// ---------- raised billboards past four corners, facing the cars as they brake ----------
+const BILLBOARD_CORNERS = [3, 8, 12, 17];
+function buildBillboards({ track, terrain, U, group }) {
+  const mat = signMaterial('billboard', U);
+  if (!mat) return;
+  const steel = std({ color: 0x1c2026, roughness: 0.5, metalness: 0.5 });
+  const w = 22, h = w / BRAND.aspect.billboard, lift = 3.5;
+  const f = {}, a = {};
+  for (const n of BILLBOARD_CORNERS) {
+    const c = track.corners.find((k) => k.n === n);
+    if (!c) continue;
+    // behind the wall on the outside of the corner
+    const s = track.wrap(c.s + 5);
+    track.frame(s, f);
+    const side = c.dir === 'L' ? -1 : 1;
+    const wall = side > 0 ? track.wallL[f.i] : track.wallR[f.i];
+    const d = side * (wall + 5);
+    const x = f.x + f.lx * d, z = f.z + f.lz * d;
+    if (lakeSdf(x, z) < 6) continue;
+    // turned to face the braking zone, 150 m back up the track
+    track.frame(track.wrap(c.s - 150), a);
+    const yaw = Math.atan2(a.x - x, a.z - z);
+    const ground = terrain.heightAt(x, z);
+    const board = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.4), [steel, steel, steel, steel, mat, mat]);
+    board.position.set(x, ground + lift + h / 2, z);
+    board.rotation.y = yaw;
+    board.castShadow = true;
+    board.name = 'sponsor-billboard';
+    group.add(board);
+    for (const lx of [-w * 0.3, w * 0.3]) {
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.5, lift + 0.6, 0.5), steel);
+      post.position.set(x + Math.cos(yaw) * lx, ground + (lift + 0.6) / 2 - 0.3, z - Math.sin(yaw) * lx);
+      post.castShadow = true;
+      group.add(post);
+    }
+  }
 }
 
 // ---------- lakeside hospitality pods and jetties ----------
