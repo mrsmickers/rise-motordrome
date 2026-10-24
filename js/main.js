@@ -176,19 +176,41 @@ async function boot() {
   app.rig.update(0.016, app.pose, vehicle);
   atmo.update(0.016, app.pose.pos);
   try { await renderer.compileAsync(scene, camera); } catch (err) { console.warn('compileAsync', err); }
-  await status('Ready', 1);
-  $('intro-status').hidden = true;
-  $('intro-actions').hidden = false;
-  $('btn-drive').focus({ preventScroll: true });
 
+  // Start rendering behind the loader. The first frames build the post-processing, shadow and reflection
+  // passes, so Ready only shows once frames run smoothly from every camera.
   window.addEventListener('resize', onResize);
   let last = performance.now();
   renderer.setAnimationLoop(() => {
     const now = performance.now();
+    app.frameMs = now - last;
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
     frame(dt);
   });
+  await status('Warming up the cameras and engine', 0.93);
+  // the engine sound graph is built now (silent until a button press) so starting does not stall
+  try { await app.sound.init(); app.sound.setMuted(true); } catch (err) { console.warn('Audio unavailable', err); }
+  await warmUp();
+  perf.ema = 1 / 60; perf.slowFor = perf.fastFor = 0; perf.grace = 4;
+  await status('Ready', 1);
+  $('intro-status').hidden = true;
+  $('intro-actions').hidden = false;
+  $('btn-drive').focus({ preventScroll: true });
+}
+
+// Show every camera for a few frames, then wait for a run of smooth frames
+async function warmUp() {
+  const rig = app.rig, frames = (n) => new Promise((res) => { let k = 0; const f = () => (++k >= n ? res() : requestAnimationFrame(f)); requestAnimationFrame(f); });
+  rig.cinematic = false;
+  for (const i of [2, 0, 4, 5, 1, 3]) { rig.set(i); await frames(4); }
+  rig.cinematic = true; rig.first = true;
+  const t0 = performance.now();
+  let good = 0;
+  while (good < 12 && performance.now() - t0 < 30000) {
+    await frames(1);
+    good = app.frameMs < 34 ? good + 1 : 0;
+  }
 }
 
 function setCar(i, first = false) {
@@ -249,6 +271,7 @@ function wireUi() {
   $('btn-reverse').addEventListener('click', () => setDirection(!app.reverse, true));
   document.querySelectorAll('.dir-btn').forEach((b) => b.addEventListener('click', () => setDirection(b.dataset.dir === '1', false)));
   $('btn-show').addEventListener('click', () => toggleHud(false));
+  $('btn-menu').addEventListener('click', returnToMenu);
   $('btn-sound').addEventListener('click', toggleSound);
   $('btn-hide').addEventListener('click', () => toggleHud(true));
   $('btn-full').addEventListener('click', toggleFull);
@@ -258,6 +281,30 @@ function wireUi() {
   // buttons must not keep focus, or Space presses them again
   document.addEventListener('pointerup', (e) => { const b = e.target.closest('button'); if (b) b.blur(); });
   if (matchMedia('(pointer: coarse)').matches) { $('touch').hidden = false; document.body.classList.add('touch-ui'); }
+}
+
+// Back to the title screen; the car keeps lapping behind it for the broadcast views
+function returnToMenu() {
+  if (app.mode !== 'drive') return;
+  app.mode = 'intro';
+  app.startPhase = null;
+  clearTimeout(app.lightsTimer);
+  $('title-card').hidden = true;
+  $('start-lights').hidden = true;
+  app.startLights.forEach((u) => (u.value = 0));
+  app.startLights.green.value = 0;
+  for (const p of document.querySelectorAll(':popover-open')) p.hidePopover();
+  $('hud').classList.remove('clean');
+  $('hud').hidden = true;
+  $('intro').classList.remove('gone');
+  setAutopilot(true);
+  const tr = app.track, v = app.vehicle, s = tr.wrap(v.s);
+  v.reset(s, tr.lineOffset(s));
+  v.v = v.profile.v[Math.floor(s / tr.lineStep) % v.profile.v.length];
+  app.rig.cinematic = true;
+  app.rig.first = true;
+  app.sound.setMuted(true);
+  $('btn-drive').focus({ preventScroll: true });
 }
 
 function toggleHud(hide) {
@@ -311,6 +358,7 @@ async function start(hotlap) {
     await app.sound.init();
     app.sound.setCar(CARS[app.carIndex]);
     app.sound.resume();
+    app.sound.setMuted(false);
   } catch (err) { console.warn('Audio unavailable', err); }
   $('intro').classList.add('gone');
   $('hud').hidden = false;
@@ -389,6 +437,7 @@ function onKey(e) {
     case 'KeyN': toggleSound(); break;
     case 'KeyH': toggleHud(!$('hud').classList.contains('clean')); break;
     case 'KeyC': setDirection(!app.reverse, true); break;
+    case 'Escape': if (!document.querySelector(':popover-open')) returnToMenu(); break;
     case 'KeyF': toggleFull(); break;
     default: break;
   }
@@ -527,7 +576,7 @@ function frame(dt) {
 }
 
 // Step quality down when frames stay slow: first ambient occlusion, then resolution. Up again when there is headroom.
-const perf = { ema: 1 / 60, slowFor: 0, fastFor: 0, grace: 6 };
+const perf = { ema: 1 / 60, slowFor: 0, fastFor: 0, grace: 30 };
 function adaptQuality(dt) {
   perf.grace -= dt;
   perf.ema += (dt - perf.ema) * Math.min(1, dt * 1.5);

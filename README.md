@@ -1,5 +1,7 @@
 # African Grand Prix
 
+Version 0.4 beta.
+
 A browser sim of the planned African Grand Prix circuit in Bugesera, Rwanda (interim name RISE Motordrome), built with three.js (WebGPU, with a WebGL 2 fallback). You drive or ride along in an F1 car on a 6 km, 17-turn lap with 197 m of climbing, beside Lake Kidogo.
 
 Everything is generated in code: the terrain, track, stands, trees, cars and all the sound. The only downloads are three.js from jsDelivr and two Google Fonts.
@@ -37,6 +39,7 @@ All paths are relative, so it works from a sub-path. The `.nojekyll` file stops 
 | `T` | Time of day: dawn, day, sunset, floodlit night |
 | `C` | Reverse: run the lap clockwise (also on the title screen and the toolbar) |
 | `N` / `H` / `F` | Sound, HUD (the eye button top right brings it back), full screen |
+| `Esc` | Back to the menu (also the Menu button, top left) |
 | Mouse drag / scroll | Look around / zoom |
 
 Gamepads work (right trigger throttle, left trigger brake, left stick steer, Y camera, X hot lap). Phones get an on-screen steering pad and pedals.

@@ -108,6 +108,7 @@ export class Sound {
     this.lastShift = 0;
     this.prevLoad = 0;
     this.night = 0;
+    this.muted = false;
   }
 
   async init() {
@@ -118,7 +119,7 @@ export class Sound {
     await ctx.audioWorklet.addModule(url);
     URL.revokeObjectURL(url);
     this.master = ctx.createGain();
-    this.master.gain.value = this.enabled ? 0.9 : 0;
+    this.master.gain.value = this.enabled && !this.muted ? 0.9 : 0;
     const comp = ctx.createDynamicsCompressor();
     comp.threshold.value = -14; comp.ratio.value = 4; comp.attack.value = 0.004; comp.release.value = 0.2;
     this.master.connect(comp).connect(ctx.destination);
@@ -191,7 +192,17 @@ export class Sound {
 
   setEnabled(on) {
     this.enabled = on;
-    if (this.master) this.master.gain.setTargetAtTime(on ? 0.9 : 0, this.ctx.currentTime, 0.05);
+    this._applyGain();
+  }
+
+  // the menu is silent; the on/off choice is kept for when driving resumes
+  setMuted(m) {
+    this.muted = m;
+    this._applyGain();
+  }
+
+  _applyGain() {
+    if (this.master) this.master.gain.setTargetAtTime(this.enabled && !this.muted ? 0.9 : 0, this.ctx.currentTime, 0.12);
   }
 
   resume() { if (this.ctx && this.ctx.state !== 'running') this.ctx.resume(); }

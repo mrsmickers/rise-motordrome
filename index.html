@@ -42,6 +42,7 @@
       <symbol id="i-close" viewBox="0 0 24 24"><path d="m6.5 6.5 11 11M17.5 6.5l-11 11"/></symbol>
       <symbol id="i-auto" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="2"/><path d="M12 3.5V10M4.6 15.5l5.6-2.6M19.4 15.5l-5.6-2.6"/></symbol>
       <symbol id="i-flag" viewBox="0 0 24 24"><path d="M5 21V4M5 4h13l-2.5 4L18 12H5"/></symbol>
+      <symbol id="i-menu" viewBox="0 0 24 24"><path d="M14.5 6.5 9 12l5.5 5.5"/><path d="M4 12h5"/></symbol>
       <symbol id="i-reverse" viewBox="0 0 24 24"><path d="M4 9h13l-3.5-3.5M20 15H7l3.5 3.5"/></symbol>
       <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M3.5 3.5l17 17M10.6 5.6c.5-.1.9-.1 1.4-.1 6 0 9.5 6.5 9.5 6.5a16 16 0 0 1-2.4 3.2M6.6 6.6A15.6 15.6 0 0 0 2.5 12s3.5 6.5 9.5 6.5c1.6 0 3.1-.4 4.4-1.1M9.9 9.9a2.8 2.8 0 0 0 4.2 4.2"/></symbol>
     </defs>
@@ -76,7 +77,7 @@
         <button id="btn-drive" class="btn primary" type="button"><svg class="icon"><use href="#i-flag"/></svg>Drive</button>
         <button id="btn-hotlap" class="btn" type="button"><svg class="icon"><use href="#i-auto"/></svg>Ride a hot lap</button>
       </div>
-      <p class="hint-keys">Keyboard, gamepad or touch · sound on for the engine</p>
+      <p class="hint-keys">v0.4 beta · Keyboard, gamepad or touch · sound on for the engine</p>
     </div>
   </section>
 
@@ -94,6 +95,7 @@
         <div class="lap-row"><span class="k">Best</span><span id="hud-best" class="v mono">--:--.---</span></div>
         <div class="sectors"><span id="hud-s1" class="sec">S1</span><span id="hud-s2" class="sec">S2</span><span id="hud-s3" class="sec">S3</span></div>
       </div>
+      <button id="btn-menu" class="menu-btn" type="button" title="Back to the menu [Esc]"><svg class="icon"><use href="#i-menu"/></svg><span>Menu</span><kbd>Esc</kbd></button>
     </header>
 
     <nav class="hud-tr panel toolbar" aria-label="View settings">
@@ -195,6 +197,7 @@
       <div><dt>Crowd</dt><dd>100,000, two hills of 35,000 to 40,000</dd></div>
       <div><dt>Site</dt><dd>Bugesera district, 40 km south of Kigali</dd></div>
       <div><dt>Design</dt><dd>WurzDesign, Tilke, Dar</dd></div>
+      <div><dt>This sim</dt><dd>Version 0.4 beta</dd></div>
     </dl>
     <h3>Controls</h3>
     <ul class="keys">
@@ -208,6 +211,7 @@
       <li><kbd>T</kbd> time of day</li>
       <li><kbd>C</kbd> reverse direction</li>
       <li><kbd>N</kbd> sound, <kbd>H</kbd> HUD, <kbd>F</kbd> full screen</li>
+      <li><kbd>Esc</kbd> back to the menu</li>
       <li>Drag to look around, scroll to zoom</li>
     </ul>
   </div>
