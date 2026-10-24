@@ -1,6 +1,6 @@
 # African Grand Prix
 
-Version 0.13 beta.
+Version 0.14 beta. Write-up: [I built a browser sim of F1's new Rwanda track](https://simonsmyth.me/i-built-a-browser-sim-of-f1s-new-rwanda-track/).
 
 A browser sim of the planned African Grand Prix circuit in Bugesera, Rwanda (interim name RISE Motordrome), built with three.js (WebGPU, with a WebGL 2 fallback). You drive or ride along in an F1 car on a 6 km, 17-turn lap with 197 m of climbing, beside a lake.
 

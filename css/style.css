@@ -85,6 +85,9 @@ kbd { font-family: var(--font-cond); font-size: 11px; padding: 1px 5px; border: 
 .btn.primary:hover { background: #ffe236; }
 .btn:focus-visible, .tool-btn:focus-visible, .seg-btn:focus-visible, .icon-btn:focus-visible, .car-card:focus-visible, .cam-current:focus-visible { outline: 2px solid var(--rw-blue); outline-offset: 2px; }
 .hint-keys { margin: 14px 0 0; font-size: 12.5px; color: var(--muted); }
+.built-by { margin: 14px 0 0; font-size: 14px; color: var(--text); }
+.built-by a { color: var(--rw-yellow); font-weight: 600; text-underline-offset: 2px; }
+.built-by + .hint-keys { margin-top: 6px; }
 
 /* HUD shell */
 .hud { position: fixed; inset: 0; z-index: 10; pointer-events: none; }
@@ -316,6 +319,7 @@ body.touch-ui .hud-bc { display: none; }
   .intro-card { width: min(760px, 100%); padding: 14px 20px 14px; }
   .eyebrow { margin-top: 10px; }
   .intro-status, .intro-actions { margin-top: 2px; }
+  .built-by { margin-top: 8px; font-size: 13px; }
   .facts dd { font-size: 16px; }
   .facts { grid-template-columns: repeat(4, 1fr); }
   .intro h1 { font-size: 34px; }
