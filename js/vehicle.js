@@ -340,7 +340,7 @@ export class Vehicle {
       this.latAcc = this.v * this.v * kLine;
       this.vertAcc = this.v * this.v * f.vcurv;
       // wheel angle from the path the car is actually taking, so it turns while it moves across
-      const steerT = clamp(((this.r / Math.max(this.v, 3)) * car.wheelbase) / 0.36 * 1.4, -1, 1);
+      const steerT = clamp(((this.r / Math.max(this.v, 3)) * car.wheelbase) / 0.36 * 2.2, -1, 1);
       this.steer += (steerT - this.steer) * Math.min(1, h * 10);
       // pedals and gears as a driver would use them
       this.throttle = acc > 0.5 ? clamp(0.55 + acc / 20, 0, 1) : acc > -2 ? 0.25 : 0;

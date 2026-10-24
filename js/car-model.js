@@ -78,17 +78,38 @@ function prepareModel(gltf) {
   for (const c of corners) {
     c.centre = c.box.getCenter(new THREE.Vector3());
     c.front = c.sz > 0;
-    for (const p of c.parts) { p.geometry.translate(-c.centre.x, -c.centre.y, -c.centre.z); p.geometry.computeBoundingSphere(); }
+    c.coverX = 0;
+    for (const p of c.parts) {
+      p.geometry.translate(-c.centre.x, -c.centre.y, -c.centre.z);
+      p.geometry.computeBoundingSphere();
+      // outer face of the wheel cover, clear of the centre nut, for the logo disc
+      if (p.role !== 'wheel') continue;
+      const a = p.geometry.attributes.position;
+      for (let i = 0; i < a.count; i++) {
+        const r = Math.hypot(a.getY(i), a.getZ(i));
+        if (r > 0.08 && r < 0.19) c.coverX = Math.max(c.coverX, a.getX(i) * c.sx);
+      }
+    }
   }
   for (const b of body) b.geometry.computeBoundingSphere();
   // tyre texture with the red sidewall lettering painted out
   const tyre = new THREE.MeshStandardNodeMaterial({ roughness: 0.85, side: THREE.DoubleSide });
+  let rubber = vec3(0.035);
   if (sidewallMat && sidewallMat.map) {
     const t = texture(sidewallMat.map, uv());
     const lettering = smoothstep(0.1, 0.25, t.r.sub(max(t.g, t.b)));
     // the normal map is left off: it carries the same lettering embossed in the rubber
-    tyre.colorNode = mix(t.rgb, vec3(0.035, 0.035, 0.038), lettering);
-  } else tyre.colorNode = vec3(0.035);
+    rubber = mix(t.rgb, vec3(0.035, 0.035, 0.038), lettering);
+  }
+  // compound ring on the sidewall in three arcs, so the wheel is seen to turn; it blurs to a solid ring at speed
+  const speed = uniform(0); // wheel turn rate, rad/s
+  const p = positionLocal, rr = length(vec2(p.y, p.z));
+  const side = step(0.75, abs(normalLocal.x));
+  const ring = smoothstep(0.011, 0.005, abs(rr.sub(0.3))).mul(side);
+  const arcs = step(0.2, fract(atan(p.y, p.z).mul(3 / (2 * Math.PI))));
+  const shown = mix(arcs, float(0.8), smoothstep(14.0, 40.0, speed));
+  tyre.colorNode = mix(rubber, vec3(0.85, 0.08, 0.06), ring.mul(shown));
+  tyre.userData.speed = speed;
   return { body, corners, tyre };
 }
 
@@ -573,6 +594,34 @@ function decalMapper(d, aspect, tris, eye) {
   };
 }
 
+// Wheel cover: a navy disc with the sponsor logo near the rim and an accent ring; the logo smears as the wheel spins up
+function coverMaterial() {
+  const tex = brandTexture('logo');
+  const mat = new THREE.MeshStandardNodeMaterial({ roughness: 0.38, metalness: 0.15 });
+  const speed = uniform(0); // wheel turn rate, rad/s
+  const st = uv().sub(0.5).mul(2.0), r = length(st);
+  const W = 0.95, H = W / BRAND.aspect.logo;
+  // up to five samples spread over the turn of one frame
+  const smear = min(speed.div(60.0), 0.9);
+  let a = float(0);
+  if (tex) {
+    for (const k of [-2, -1, 0, 1, 2]) {
+      const ang = smear.mul(k * 0.25), c = cos(ang), s = sin(ang);
+      const px = st.x.mul(c).sub(st.y.mul(s)), py = st.x.mul(s).add(st.y.mul(c));
+      const lu = px.div(W).add(0.5), lv = py.sub(0.5).div(H).add(0.5);
+      const inside = step(0.0, lu).mul(step(lu, 1.0)).mul(step(0.0, lv)).mul(step(lv, 1.0));
+      a = a.add(texture(tex, vec2(lu, lv)).a.mul(inside).mul(0.2));
+    }
+  }
+  // flat out it is a pale blur round the cover
+  const blurred = smoothstep(0.62, 0.55, abs(r.sub(0.5))).mul(0).add(smoothstep(0.75, 0.68, r).mul(smoothstep(0.3, 0.37, r)).mul(0.16));
+  const logoA = mix(a, blurred, smoothstep(25.0, 70.0, speed));
+  const ringA = smoothstep(0.86, 0.89, r).mul(smoothstep(0.97, 0.94, r));
+  mat.colorNode = mix(mix(vec3(new THREE.Color(BRAND.navy)), vec3(1.0), logoA), vec3(new THREE.Color(BRAND.accent)), ringA);
+  mat.userData.speed = speed;
+  return mat;
+}
+
 // ---------- model builders ----------
 
 export function buildCar(car) {
@@ -647,6 +696,9 @@ export function buildCar(car) {
   const rimMat = rimMaterial(car.model.wheelCovers);
   tyreMat.userData.R.value = car.wheelRadius;
   tyreMat.userData.RR.value = car.model.rimRadius;
+  const wheelSpeed = [];
+  const cover = geo.corners ? coverMaterial() : null;
+  if (cover) wheelSpeed.push(cover.userData.speed, MODEL.tyre.userData.speed);
   for (const c of geo.corners || []) {
     const steer = new THREE.Group();
     steer.position.copy(c.centre);
@@ -657,6 +709,10 @@ export function buildCar(car) {
       m.castShadow = true; m.receiveShadow = true;
       spin.add(m);
     }
+    // logo disc on the outer face of the wheel cover
+    const disc = new THREE.Mesh(new THREE.CircleGeometry(0.2, 40).rotateY(c.sx > 0 ? Math.PI / 2 : -Math.PI / 2).translate(c.sx * (c.coverX + 0.003), 0, 0), cover);
+    disc.receiveShadow = true;
+    spin.add(disc);
     root.add(steer);
     wheels.push({ steer, spin, front: c.front });
   }
@@ -707,7 +763,7 @@ export function buildCar(car) {
   updateHands();
 
   root.userData = {
-    wheels, flap, rainOn, steeringWheel: sw, paint, updateHands,
+    wheels, flap, rainOn, steeringWheel: sw, paint, updateHands, wheelSpeed,
     eye: new THREE.Vector3(0, geo.helmetY + 0.085, geo.helmetZ + 0.13),
     tcam: new THREE.Vector3(0, geo.tcamY, geo.tcamZ),
     nose: new THREE.Vector3(0, geo.noseCamY, geo.noseCamZ),

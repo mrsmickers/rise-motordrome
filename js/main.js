@@ -32,7 +32,6 @@ const status = async (text, p) => {
   bootLast = now;
   if (p === 1) console.info('[boot] stage times', bootTimes.join(' '));
   $('intro-status-text').textContent = text;
-  $('intro-progress').style.width = `${Math.round(p * 100)}%`;
   await nextFrame();
 };
 
@@ -530,7 +529,9 @@ function updatePose(dt) {
   const spin = (v.v / car.wheelRadius) * dt;
   for (const w of ud.wheels) {
     w.spin.rotation.x += spin;
-    if (w.front) w.steer.rotation.y = v.steer * 0.3;
+    // shown larger than an F1 car turns at speed, so the steering reads from the chase camera:
+    // small inputs count three times over, full lock is 26 degrees
+    if (w.front) w.steer.rotation.y = 0.45 * (v.steer * 3) / (1 + 2 * Math.abs(v.steer));
   }
   if (ud.flap) ud.flap.rotation.x += ((v.straightMode ? -0.42 : 0) - ud.flap.rotation.x) * Math.min(1, dt * 10);
   const blink = Math.floor(performance.now() / 120) % 2;
@@ -540,6 +541,7 @@ function updatePose(dt) {
   ud.updateHands();
   const rimMat = ud.wheels[0].spin.children[1].material;
   if (rimMat.userData.speed) rimMat.userData.speed.value = Math.abs(v.v);
+  for (const u of ud.wheelSpeed) u.value = Math.abs(v.v) / car.wheelRadius;
 }
 
 function listenerFor() {
@@ -647,6 +649,7 @@ function adaptQuality(dt) {
 
 boot().catch((err) => {
   console.error(err);
+  $('intro-status').classList.add('failed');
   $('intro-status-text').textContent = 'This browser could not start the 3D view: ' + (err && err.message ? err.message : err);
 });
 

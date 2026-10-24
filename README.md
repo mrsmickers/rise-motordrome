@@ -1,6 +1,6 @@
 # African Grand Prix
 
-Version 0.15 beta. Write-up: [I built a browser sim of F1's new Rwanda track](https://simonsmyth.me/i-built-a-browser-sim-of-f1s-new-rwanda-track/).
+Version 0.16 beta. Write-up: [I built a browser sim of F1's new Rwanda track](https://simonsmyth.me/i-built-a-browser-sim-of-f1s-new-rwanda-track/).
 
 A browser sim of the planned African Grand Prix circuit in Bugesera, Rwanda (interim name RISE Motordrome), built with three.js (WebGPU, with a WebGL 2 fallback). You drive or ride along in an F1 car on a 6 km, 17-turn lap with 197 m of climbing, beside a lake.
 
@@ -73,7 +73,7 @@ Air density is set for 1,390 m above sea level (about 86% of sea level), which c
 - **Heights:** designed to what Alex Wurz and Carsten Tilke have said: 1,363.5 to 1,415 m above sea level, 196 m of climbing a lap, grades up to 15%, a 10.8% drop into Turn 2 and a 14 to 15% climb out of it, a back straight that drops, compresses and climbs at about 12.5%, a crest off the canopy corner into a 10% compression, and a hill into the double right with the compression at the apex.
 - **Banking:** 12% through Turn 2, easing to 6% then 4% on exit; over 12% at the top hairpin and the forest corner; positive camber everywhere, no off-camber corners.
 - **Venue:** stands with white membrane roofs, pit building, terraced red-earth paddock with a cone tower, two spectator hills, bridges near the final corner and on the crest before Turn 8, lakeside hospitality pods with jetties, papyrus islands on the lake, villages in dry red-earth farmland, and Bugesera airport 3.5 km north.
-- **Wildlife:** herds of giraffes, elephants, zebras and impala graze in open glades back from the track, and two pods of hippos sit in the lake. Each animal walks, stops to graze and walks on. Sites are chosen where the track can see them; the trees leave the glades open.
+- **Wildlife:** herds of giraffes, elephants, zebras and impala graze in open glades just beyond the walls, and two pods of hippos sit in the lake. Each animal walks, stops to graze and walks on. Sites are chosen for how long they sit ahead of the car through the lap; the trees leave the glades and the view in open. `tools/animal-visibility.mjs` (in the working folder) measures how much of the lap each herd is in view.
 
 To change the layout or heights, edit `tools/build_track.py` and rerun it. It reads `tools/base_centreline.json` (the traced lap) and `tools/official_esses.json` (the stretch from the official render) and rewrites `js/track-data.js`. It needs `numpy` and `scipy`.
 

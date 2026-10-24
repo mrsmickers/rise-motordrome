@@ -60,8 +60,14 @@ kbd { font-family: var(--font-cond); font-size: 11px; padding: 1px 5px; border: 
 .facts dd { margin: 6px 0 0; font: 600 19px/1 var(--font-cond); white-space: nowrap; }
 .intro-status[hidden] { display: none; }
 .intro-status { display: grid; gap: 8px; font: 500 13px/1.2 var(--font-cond); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
-.intro-status .bar { height: 3px; border-radius: 2px; background: rgba(255, 255, 255, 0.1); overflow: hidden; }
-.intro-status .bar span { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--rw-blue), var(--rw-yellow), var(--rw-green-bright)); transition: width 0.3s ease; }
+/* the loading words sit in their own panel with room around them */
+.intro-status { color: var(--text); margin: 2px 0 18px; padding: 12px 16px; border-radius: 10px; background: rgba(255, 255, 255, 0.05); border: 1px solid var(--line); }
+/* three dots that fill in turn, so the loading message shows it is still working */
+.intro-status .dots { display: inline-block; width: 0; overflow: hidden; vertical-align: bottom; animation: loading-dots 1.4s steps(4, end) infinite; }
+.intro-status .dots::before { content: '...'; }
+.intro-status.failed .dots { display: none; }
+@keyframes loading-dots { to { width: 1.2em; } }
+@media (prefers-reduced-motion: reduce) { .intro-status .dots { width: auto; animation: none; } }
 .intro-actions { display: flex; gap: 10px; flex-wrap: wrap; }
 .dir-switch { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 0 0 14px; }
 .dir-switch .k { margin-right: 4px; }
@@ -319,6 +325,7 @@ body.touch-ui .hud-bc { display: none; }
   .intro-card { width: min(760px, 100%); padding: 14px 20px 14px; }
   .eyebrow { margin-top: 10px; }
   .intro-status, .intro-actions { margin-top: 2px; }
+  .intro-status { margin-bottom: 10px; padding: 8px 12px; }
   .built-by { margin-top: 8px; font-size: 13px; }
   .facts dd { font-size: 16px; }
   .facts { grid-template-columns: repeat(4, 1fr); }

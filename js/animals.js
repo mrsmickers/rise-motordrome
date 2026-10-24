@@ -90,7 +90,7 @@ function elephant() {
 // zebra and impala share a body plan; the impala is smaller and two-tone
 function antelope(kind) {
   const P = [];
-  const k = kind === 'impala' ? 0.68 : 1;
+  const k = kind === 'impala' ? 0.8 : 1; // impala stand about 0.9 m at the shoulder
   const body = kind === 'impala' ? 0xa5622c : 0xf2efe6;
   const pat = kind === 'impala' ? 5 : 3;
   const lp = kind === 'impala' ? 0 : 4;
@@ -124,11 +124,11 @@ function hippo() {
 
 const SPECIES = {
   // minD and maxD: how far the herd's centre sits from the track centreline, in metres
-  giraffe: { make: giraffe, herds: 3, size: [4, 6], young: 0.3, minD: 34, maxD: 95, radius: 18 },
-  elephant: { make: elephant, herds: 2, size: [4, 6], young: 0.35, minD: 36, maxD: 95, radius: 18 },
-  zebra: { make: () => antelope('zebra'), herds: 3, size: [6, 9], young: 0.15, minD: 26, maxD: 70, radius: 13 },
-  impala: { make: () => antelope('impala'), herds: 3, size: [8, 12], young: 0.2, minD: 26, maxD: 95, radius: 12 },
-  hippo: { make: hippo, herds: 2, size: [3, 5], young: 0.2, minD: 25, maxD: 120, radius: 9, water: true }
+  giraffe: { make: giraffe, herds: 4, size: [4, 6], young: 0.3, minD: 20, maxD: 90, radius: 14 },
+  elephant: { make: elephant, herds: 3, size: [4, 6], young: 0.35, minD: 22, maxD: 90, radius: 14 },
+  zebra: { make: () => antelope('zebra'), herds: 3, size: [6, 9], young: 0.15, minD: 14, maxD: 55, radius: 8, near: 1 },
+  impala: { make: () => antelope('impala'), herds: 2, size: [8, 12], young: 0.2, minD: 14, maxD: 55, radius: 8, near: 1 },
+  hippo: { make: hippo, herds: 2, size: [3, 5], young: 0.2, minD: 18, maxD: 110, radius: 8, water: true }
 };
 
 // ---------- material: patterns and motion ----------
@@ -194,19 +194,36 @@ export function planHerds(track, terrain) {
   const forest = c10 && c11 ? { a: track.wrap(c10.s - 250), b: track.wrap(c11.s + 250) } : null;
   const within = (r, s) => (r.a > r.b ? s >= r.a || s <= r.b : s >= r.a && s <= r.b);
   const pts = [], near = {};
-  for (let s = 0; s < track.length; s += 6) { const f = track.frame(s, {}); pts.push({ x: f.x, z: f.z, y: f.y, s }); }
+  for (let s = 0; s < track.length; s += 6) { const f = track.frame(s, {}); pts.push({ x: f.x, z: f.z, y: f.y, s, tx: f.tx, tz: f.tz }); }
   const nearest = (x, z) => { let b = pts[0], bd = Infinity; for (const p of pts) { const d = (p.x - x) ** 2 + (p.z - z) ** 2; if (d < bd) { bd = d; b = p; } } return { p: b, d: Math.sqrt(bd) }; };
-  // seen from 2 m above the track: higher ground and nearer score better; -1 if a hill is in the way
-  const sight = (x, z, h, water) => {
-    const { p, d } = nearest(x, z);
-    // hippos sit low in the water: seen from the lakeside, the TV cameras and the helicopter, so just keep them near
-    if (water) return { score: (140 - d) * 0.25, p, d };
-    const eye = p.y + 2, ground = water ? LAKE_LEVEL : terrain.heightAt(x, z), target = ground + h * 0.6;
-    for (let t = 0.12; t < 0.96; t += 0.06) {
+  // can a driver at track point p (eye 1.5 m up) see the animals' backs, h tall, at (x, z)? Hills and the lake bank block
+  const clearView = (p, x, z, h, water) => {
+    const eye = p.y + 1.5, target = (water ? LAKE_LEVEL : terrain.heightAt(x, z)) + h * 0.7;
+    for (let t = 0.1; t < 0.95; t += 0.05) {
       const gx = p.x + (x - p.x) * t, gz = p.z + (z - p.z) * t;
-      if (Math.max(terrain.heightAt(gx, gz), lakeSdf(gx, gz) < 0 ? LAKE_LEVEL : -1e9) > eye + (target - eye) * t - 0.4) return null;
+      const g = Math.max(terrain.heightAt(gx, gz), lakeSdf(gx, gz) < 0 ? LAKE_LEVEL : -1e9);
+      if (g > eye + (target - eye) * t - 0.3) return false;
     }
-    return { score: Math.min(target - eye, 8) * 0.3 + (100 - d) * 0.25, p, d };
+    return true;
+  };
+  // Score: how much of the lap the herd sits ahead of the car (within 35 degrees of the way it is going, 25 to 170 m out,
+  // either direction of travel), plus how close it comes. Returns null if it is never in view ahead.
+  const sight = (x, z, h, water, nearW = 0) => {
+    const { p, d } = nearest(x, z);
+    // hippos sit low in the water, seen from the lakeside, the TV cameras and the helicopter: just keep them near
+    if (water) return { score: (140 - d) * 0.25, p, d, far: p };
+    let n = 0, far = null, farD = 0;
+    for (let k = 0; k < pts.length; k += 3) {
+      const q = pts[k], dx = x - q.x, dz = z - q.z, dd = Math.hypot(dx, dz);
+      if (dd < 25 || dd > 170) continue;
+      if (Math.abs((dx * q.tx + dz * q.tz) / dd) < 0.82) continue;
+      if (!clearView(q, x, z, h, water)) continue;
+      n++;
+      if (dd > farD) { farD = dd; far = q; }
+    }
+    if (n < 2) return null;
+    // small animals must come close to be seen at all, so nearness counts for more
+    return { score: n + (90 - d) * (nearW ? 0.6 : 0.15), p, d, far };
   };
   const herds = {}, taken = [];
   for (const [key, cfg] of Object.entries(SPECIES)) {
@@ -220,28 +237,28 @@ export function planHerds(track, terrain) {
         if (cfg.water ? !waterOk(x, z) : !landOk(terrain, x, z, cfg.minD)) continue;
         // the whole range must lie beyond the wall, clear of the fence
         const tn = track.nearest(x, z, near), fr = track.frame(tn.s, {});
-        if (Math.abs(tn.d) < (tn.d > 0 ? track.wallL[fr.i] : track.wallR[fr.i]) + 6 + cfg.radius) continue;
+        if (Math.abs(tn.d) < (tn.d > 0 ? track.wallL[fr.i] : track.wallR[fr.i]) + 4 + cfg.radius) continue;
         // apart from their own kind; mixed groups (zebra with impala, say) can share ground
         if (taken.some((t) => Math.hypot(t.x - x, t.z - z) < (t.key === key ? 260 : 110))) continue;
         if (!cfg.water) {
           const h0 = terrain.heightAt(x, z);
           if ([[20, 0], [-20, 0], [0, 20], [0, -20]].some(([dx, dz]) => Math.abs(terrain.heightAt(x + dx, z + dz) - h0) > 6)) continue;
         }
-        const v = sight(x, z, SIGHT_H[key], cfg.water);
+        const v = sight(x, z, SIGHT_H[key], cfg.water, cfg.near);
         if (!v || within(pit, v.p.s) || (!cfg.water && forest && within(forest, v.p.s))) continue;
-        if (!best || v.score > best.score) best = { key, x, z, r: cfg.radius, score: v.score, view: v.p, water: !!cfg.water };
+        if (!best || v.score > best.score) best = { key, x, z, r: cfg.radius, score: v.score, views: [v.p, v.far], water: !!cfg.water };
       }
       if (best) { herds[key].push(best); taken.push(best); }
     }
   }
-  // glades: the herd's range, and a corridor from the track so the view in stays open
+  // glades: the herd's range, and corridors from the nearest point and from the furthest point it is seen ahead
   const all = Object.values(herds).flat().filter((g) => !g.water);
-  const clear = (x, z) => all.some((g) => {
-    if (Math.hypot(x - g.x, z - g.z) < g.r + 14) return true;
-    const vx = g.x - g.view.x, vz = g.z - g.view.z, L2 = vx * vx + vz * vz;
-    const t = clamp(((x - g.view.x) * vx + (z - g.view.z) * vz) / L2, 0, 1);
-    return Math.hypot(x - (g.view.x + vx * t), z - (g.view.z + vz * t)) < 16;
-  });
+  const inCorridor = (x, z, g, v) => {
+    const vx = g.x - v.x, vz = g.z - v.z, L2 = vx * vx + vz * vz;
+    const t = clamp(((x - v.x) * vx + (z - v.z) * vz) / L2, 0, 1);
+    return Math.hypot(x - (v.x + vx * t), z - (v.z + vz * t)) < 14;
+  };
+  const clear = (x, z) => all.some((g) => Math.hypot(x - g.x, z - g.z) < g.r + 12 || g.views.some((v) => inCorridor(x, z, g, v)));
   return { herds, clear };
 }
 
