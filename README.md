@@ -1,6 +1,6 @@
 # African Grand Prix
 
-Version 0.17 beta. Write-up: [I built a browser sim of F1's new Rwanda track](https://simonsmyth.me/i-built-a-browser-sim-of-f1s-new-rwanda-track/).
+Version 0.18 beta. Write-up: [I built a browser sim of F1's new Rwanda track](https://simonsmyth.me/i-built-a-browser-sim-of-f1s-new-rwanda-track/).
 
 A browser sim of the planned African Grand Prix circuit in Bugesera, Rwanda (interim name RISE Motordrome), built with three.js (WebGPU, with a WebGL 2 fallback). You drive or ride along in an F1 car on a 6 km, 17-turn lap with 197 m of climbing, beside a lake.
 
@@ -72,6 +72,7 @@ Air density is set for 1,390 m above sea level (about 86% of sea level), which c
 - **Layout:** traced from u/maxx-usa's 2D reconstruction of the 13 October 2026 render (r/RaceTrackDesigns) and scaled to 6.0 km, anticlockwise. The esses are taken from the official Tilke / Dar / WurzDesign layout render: a camera fitted to its magenta line (3.7 px average error) projects it onto the ground.
 - **Heights:** designed to what Alex Wurz and Carsten Tilke have said: 1,363.5 to 1,415 m above sea level, 196 m of climbing a lap, grades up to 15%, a 10.8% drop into Turn 2 and a 14 to 15% climb out of it, a back straight that drops, compresses and climbs at about 12.5%, a crest off the canopy corner into a 10% compression, and a hill into the double right with the compression at the apex.
 - **Banking:** 12% through Turn 2, easing to 6% then 4% on exit; over 12% at the top hairpin and the forest corner; positive camber everywhere, no off-camber corners.
+- **Pit lane:** you can drive it. The entry leaves the track after the final hairpin, the pit wall runs past the garages, and the exit road runs round the inside of Turn 1 and joins the track before Turn 2, as at the Red Bull Ring. The pit building follows the 4% climb of the straight.
 - **Venue:** stands with white membrane roofs, pit building, terraced red-earth paddock with a cone tower, two spectator hills, bridges near the final corner and on the crest before Turn 8, lakeside hospitality pods with jetties, papyrus islands on the lake, villages in dry red-earth farmland, and Bugesera airport 3.5 km north.
 - **Wildlife:** herds of giraffes, elephants, zebras and impala graze in open glades just beyond the walls, and two pods of hippos sit in the lake. Each animal walks, stops to graze and walks on. Sites are chosen for how long they sit ahead of the car through the lap; the trees leave the glades and the view in open.
 

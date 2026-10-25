@@ -95,7 +95,7 @@ export class Assists {
     // stuck off the track, against a wall or facing the wrong way: put the car back on the line
     this.recovered = Math.max(0, this.recovered - dt);
     if (c.recover) {
-      const offTrack = Math.abs(v.d) > f.half + 1.5;
+      const offTrack = Math.abs(v.d) > f.half + 1.5 && !tr.inPitArea(v.s, v.d);
       const backwards = Math.cos(v.psi) < -0.2;
       const stuck = (av < 2.5 && (offTrack || v.wallHit > 0)) || backwards;
       this.stuckFor = stuck ? this.stuckFor + dt : 0;

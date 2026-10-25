@@ -3,6 +3,7 @@ import {
   Fn, attribute, positionWorld, vec2, vec3, vec4, float, mix, smoothstep, abs, fract, floor, max, min, step, fwidth,
   mx_noise_float, mod, select, uniform, sin, clamp, positionLocal, uv, bumpMap
 } from 'three/tsl';
+import { PIT } from './track.js';
 
 const RING = 2; // metres between cross-sections
 
@@ -46,7 +47,9 @@ export function buildTrackMeshes(track, U) {
     return B.vert(x, y, z, extra);
   };
   // ring loops close the circuit by reusing the first ring's indices
-  const rings = { road: [], kerbL: [], kerbR: [], runL: [], runR: [], grassL: [], grassR: [], wallL: [], wallR: [], fenceL: [], fenceR: [] };
+  const rings = { road: [], kerbL: [], kerbR: [], runL: [], runR: [], grassL: [], grassR: [], wallL: [], wallR: [], fenceL: [], fenceR: [], pitOuter: [] };
+  const pitRing = [], garageRing = [];
+  const g0 = track.wrap(track.startLine + PIT.garages[0] + 1), g1 = track.wrap(track.startLine + PIT.garages[1] - 1);
   for (let r = 0; r < nR; r++) {
     const s = r * RING;
     const fr = track.frame(s, f);
@@ -93,6 +96,11 @@ export function buildTrackMeshes(track, U) {
     };
     rings.wallL.push(wallRing(1, wL));
     rings.wallR.push(wallRing(-1, wR));
+    // along the pits the outer wall follows the garage line; the garages themselves stand in for it
+    const pit = track.pitWall[i] === 1;
+    pitRing.push(pit);
+    garageRing.push(g0 > g1 ? s >= g0 || s <= g1 : s >= g0 && s <= g1);
+    rings.pitOuter.push(pit ? wallRing(1, track.pitTo[i]) : null);
     const fenceRing = (side, d0) => {
       const h0 = track.heightAt(s, side * (d0 + 0.2), fr) + 1.05;
       const x = fr.x + fr.lx * side * (d0 + 0.22), z = fr.z + fr.lz * side * (d0 + 0.22);
@@ -116,20 +124,40 @@ export function buildTrackMeshes(track, U) {
   stitch(runoff, rings.runL, false); stitch(runoff, rings.runR, true);
   stitch(grass, rings.grassL, false); stitch(grass, rings.grassR, true);
   // walls: left wall faces right (towards the track), right wall faces left
-  const stitchWall = (list, side) => {
-    for (let r = 0; r < nR; r++) {
-      const A = list[r], C = list[(r + 1) % nR];
-      for (let k = 0; k < 3; k++) {
-        if (side > 0) wall.quad(A[k], A[k + 1], C[k], C[k + 1]);
-        else wall.quad(A[k + 1], A[k], C[k + 1], C[k]);
-      }
+  const wallQuads = (A, C, side) => {
+    for (let k = 0; k < 3; k++) {
+      if (side > 0) wall.quad(A[k], A[k + 1], C[k], C[k + 1]);
+      else wall.quad(A[k + 1], A[k], C[k + 1], C[k]);
     }
   };
-  stitchWall(rings.wallL, 1); stitchWall(rings.wallR, -1);
-  const stitchFence = (list) => {
-    for (let r = 0; r < nR; r++) { const A = list[r], C = list[(r + 1) % nR]; fence.quad(A[0], A[1], C[0], C[1]); }
+  // flat end face on a wall ring, facing back along the lap (dir -1) or forward (dir 1)
+  const wallEnd = (R, dir) => {
+    const v = R.map((k) => wall.vert(...wall.pos.slice(k * 3, k * 3 + 3), { aTrack: wall.attr.aTrack.slice(k * 4, k * 4 + 4) }));
+    if (dir < 0) wall.index.push(v[3], v[0], v[1], v[3], v[1], v[2]);
+    else wall.index.push(v[0], v[3], v[2], v[0], v[2], v[1]);
   };
-  stitchFence(rings.fenceL); stitchFence(rings.fenceR);
+  for (let r = 0; r < nR; r++) {
+    const r1 = (r + 1) % nR;
+    if (pitRing[r] === pitRing[r1]) { wallQuads(rings.wallL[r], rings.wallL[r1], 1); continue; }
+    // the pit wall starts or ends here: the outer wall carries on along the garage line
+    if (pitRing[r1]) { wallQuads(rings.wallL[r], rings.pitOuter[r1], 1); wallEnd(rings.wallL[r1], -1); }
+    else { wallQuads(rings.pitOuter[r], rings.wallL[r1], 1); wallEnd(rings.wallL[r], 1); }
+  }
+  for (let r = 0; r < nR; r++) {
+    const r1 = (r + 1) % nR;
+    if (pitRing[r] && pitRing[r1] && !(garageRing[r] && garageRing[r1])) wallQuads(rings.pitOuter[r], rings.pitOuter[r1], 1);
+  }
+  for (let r = 0; r < nR; r++) wallQuads(rings.wallR[r], rings.wallR[(r + 1) % nR], -1);
+  // the catch fence stands on the pit wall in the pits and on the outer wall elsewhere, with a gap between
+  const stitchFence = (list, side) => {
+    for (let r = 0; r < nR; r++) {
+      const r1 = (r + 1) % nR;
+      if (side > 0 && pitRing[r] !== pitRing[r1]) continue;
+      const A = list[r], C = list[r1];
+      fence.quad(A[0], A[1], C[0], C[1]);
+    }
+  };
+  stitchFence(rings.fenceL, 1); stitchFence(rings.fenceR, -1);
 
   const meshes = {
     road: new THREE.Mesh(road.build(), roadMaterial(track, U)),
@@ -293,38 +321,43 @@ function fenceMaterial(U) {
   return mat;
 }
 
-// Pit lane on the left of the main straight with entry and exit ramps
+// Pit lane on the left of the main straight. The entry is paved from the track edge; in the pits the
+// surface runs from the pit wall to the garages (walkway, lane, apron); the exit road joins the track
+// before Turn 2.
 function buildPitLane(track, U) {
   const B = new StripBuilder();
-  const f = {};
-  const a = track.pitStart - 140, b = track.pitEnd + 120;
-  const len = track.wrap(b - a);
-  const n = Math.round(len / 2);
+  const f = {}, lane = {};
+  const a = track.pitStart - PIT.entry;
+  const len = track.wrap(track.pitEnd + PIT.exitLen - a);
+  const n = Math.round(len / RING);
   const rings = [];
   for (let k = 0; k <= n; k++) {
-    const s = track.wrap(a + k * 2);
+    const s = track.wrap(a + (k * len) / n);
     const fr = track.frame(s, f);
-    const e = fr.half;
-    const tIn = Math.min(1, k * 2 / 140), tOut = Math.min(1, (len - k * 2) / 120);
-    const t = Math.min(tIn, tOut);
-    const ease = t * t * (3 - 2 * t);
-    const inner = e + 0.2 + ease * 4.2, outer = inner + 12 * Math.max(0.35, ease);
-    const y = fr.y + e * fr.bank - 0.02;
-    const cols = [inner, (inner + outer) / 2, outer].map((dd) => {
+    track.laneAt(s, lane);
+    const e = fr.half, pits = lane.pits ? 1 : 0;
+    const w = lane.outer - lane.inner;
+    const from = pits ? e + PIT.wall + PIT.wallW : lane.u < 0 ? e : lane.inner;
+    const to = pits ? e + PIT.front : lane.outer;
+    rings.push([from, lane.inner, lane.inner + w / 2, lane.outer, to].map((dd) => {
       const x = fr.x + fr.lx * dd, z = fr.z + fr.lz * dd;
-      return B.vert(x, y + (dd - e) * -0.004, z, { aTrack: [s, dd - inner, outer - inner, 0] });
-    });
-    rings.push(cols);
+      return B.vert(x, track.heightAt(s, dd, fr) + 0.012, z, { aTrack: [s, dd - lane.inner, w, pits] });
+    }));
   }
   for (let k = 0; k < n; k++) {
     const A = rings[k], C = rings[k + 1];
-    for (let j = 0; j < 2; j++) B.quad(A[j], A[j + 1], C[j], C[j + 1]);
+    for (let j = 0; j < 4; j++) B.quad(A[j], A[j + 1], C[j], C[j + 1]);
   }
   const mat = new THREE.MeshStandardNodeMaterial();
   const at = attribute('aTrack', 'vec4');
-  const q = at.y, w = at.z;
-  const line = max(aaLine(q.sub(w.mul(0.42)), float(0.1)), aaLine(q.sub(0.15), float(0.08)));
-  const col = mix(vec3(0.1, 0.1, 0.105).mul(asphaltBase(positionWorld.xz)), vec3(0.85, 0.85, 0.82), line);
+  const q = at.y, w = at.z, pits = at.w;
+  // concrete walkway behind the pit wall and apron in front of the garages
+  const concrete = pits.mul(max(step(q, -0.05), step(w.add(0.05), q)));
+  const edges = max(aaLine(q.sub(0.15), float(0.08)), aaLine(q.sub(w).add(0.15), float(0.08))).mul(smoothstep(0.4, 1.2, w));
+  const fast = aaLine(q.sub(PIT.fastLane), float(0.1)).mul(step(8.0, w));
+  const line = max(edges, fast).mul(float(1).sub(concrete));
+  const ground = mix(vec3(0.1, 0.1, 0.105).mul(asphaltBase(positionWorld.xz)), vec3(0.5, 0.49, 0.46), concrete);
+  const col = mix(ground, vec3(0.85, 0.85, 0.82), line);
   mat.colorNode = col;
   mat.roughnessNode = float(0.75);
   mat.emissiveNode = col.mul(U.night).mul(U.flood).mul(1.1);

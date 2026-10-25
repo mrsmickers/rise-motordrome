@@ -6,7 +6,7 @@ import {
 import { BRAND, brandTexture } from './brand.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { lakeSdf } from './terrain.js';
-import { LAKE_LEVEL } from './track.js';
+import { LAKE_LEVEL, PIT } from './track.js';
 
 const tmpF = {};
 
@@ -161,17 +161,39 @@ function puffyRoof(len, wid, lobes) {
 }
 
 // ---------- pit building ----------
+// Geometry laid along the pit straight: local +z runs along the lap from sMid, +x away from the track
+// from the garage line, +y up from the ground there, so a long building follows the climb. Local
+// positions and normals stay in aLocal and aNormalLocal for the facade.
+function alongPits(track, geo, sMid) {
+  const p = geo.attributes.position, n = geo.attributes.normal;
+  geo.setAttribute('aLocal', p.clone());
+  geo.setAttribute('aNormalLocal', n.clone());
+  const f = {};
+  for (let k = 0; k < p.count; k++) {
+    const x = p.getX(k), y = p.getY(k), z = p.getZ(k);
+    const s = track.wrap(sMid + z);
+    const fr = track.frame(s, f);
+    const front = fr.half + PIT.front;
+    const ground = track.heightAt(s, front, fr);
+    p.setXYZ(k, fr.x + fr.lx * (front + x), ground + y, fr.z + fr.lz * (front + x));
+    const nx = n.getX(k), nz = n.getZ(k);
+    n.setXYZ(k, fr.lx * nx + fr.tx * nz, n.getY(k), fr.lz * nx + fr.tz * nz);
+  }
+  geo.computeBoundingBox(); geo.computeBoundingSphere();
+  return geo;
+}
+
 function buildPitBuilding({ track, terrain, U, group }) {
-  const len = 360, depth = 20, height = 15;
-  const sMid = track.wrap(track.startLine + 10);
-  const f = track.frame(sMid, tmpF);
-  const e = f.half;
-  const y0 = f.y + e * f.bank - 0.1;
-  const m = trackMatrix(track, sMid, e + 17 + depth / 2, y0);
-  const geo = new THREE.BoxGeometry(depth, height, len);
-  geo.translate(0, height / 2, 0);
+  const [g0, g1] = PIT.garages;
+  const len = g1 - g0, depth = 20, height = 15, foot = 2;
+  const sMid = track.wrap(track.startLine + (g0 + g1) / 2);
+  const seg = (l) => Math.ceil(l / 4);
+  // the box reaches 2 m below the ground so no gap shows where the paddock steps down
+  const geo = new THREE.BoxGeometry(depth, height + foot, len, 1, 1, seg(len));
+  geo.translate(depth / 2, (height - foot) / 2, 0);
+  alongPits(track, geo, sMid);
   const mat = std();
-  const pl = positionLocal, nl = normalLocal;
+  const pl = attribute('aLocal', 'vec3'), nl = attribute('aNormalLocal', 'vec3');
   const facade = Fn(() => {
     const front = step(0.5, abs(nl.x));
     const z = pl.z, y = pl.y;
@@ -192,31 +214,32 @@ function buildPitBuilding({ track, terrain, U, group }) {
   mat.roughnessNode = float(0.4);
   mat.metalnessNode = float(0.15);
   // garage and window glow
-  const isFront = step(0.5, abs(normalLocal.x));
-  const bay = fract(positionLocal.z.div(14.0));
-  const door = step(0.12, bay).mul(step(bay, 0.88)).mul(step(positionLocal.y, 5.2)).mul(isFront);
-  const win = step(6.4, positionLocal.y).mul(step(positionLocal.y, 13.2)).mul(isFront);
+  const isFront = step(0.5, abs(nl.x));
+  const bay = fract(pl.z.div(14.0));
+  const door = step(0.12, bay).mul(step(bay, 0.88)).mul(step(pl.y, 5.2)).mul(isFront);
+  const win = step(6.4, pl.y).mul(step(pl.y, 13.2)).mul(isFront);
   mat.emissiveNode = vec3(1.0, 0.96, 0.88).mul(door.mul(float(0.35).add(U.night.mul(1.6))).add(win.mul(U.night).mul(0.8)));
   const b = new THREE.Mesh(geo, mat);
-  b.matrixAutoUpdate = false; b.matrix.copy(m);
   b.castShadow = b.receiveShadow = true;
+  b.name = 'pit-building';
   group.add(b);
   // roof terrace overhang towards the track
-  const slab = new THREE.Mesh(new THREE.BoxGeometry(depth + 9, 0.8, len + 6), std({ color: 0xeeeeea, roughness: 0.5 }));
-  slab.matrixAutoUpdate = false;
-  slab.matrix.multiplyMatrices(m, new THREE.Matrix4().makeTranslation(-3.5, height + 0.4, 0));
+  const slabGeo = new THREE.BoxGeometry(depth + 9, 0.8, len + 6, 1, 1, seg(len + 6));
+  slabGeo.translate(depth / 2 - 3.5, height + 0.4, 0);
+  const slab = new THREE.Mesh(alongPits(track, slabGeo, sMid), std({ color: 0xeeeeea, roughness: 0.5 }));
   slab.castShadow = true;
   group.add(slab);
   // sponsor sign on the roof edge, facing the pit straight (local -x)
   const signMat = signMaterial('banner', U);
   if (signMat) {
-    const w = 32, h = w / BRAND.aspect.banner;
-    const sign = new THREE.Mesh(new THREE.PlaneGeometry(w, h), signMat);
-    sign.matrixAutoUpdate = false;
-    sign.matrix.multiplyMatrices(m, new THREE.Matrix4().makeTranslation(-17.4, height + 0.8 + 0.25 + h / 2, 0).multiply(new THREE.Matrix4().makeRotationY(-Math.PI / 2)));
-    const back = new THREE.Mesh(new THREE.BoxGeometry(0.25, h + 0.2, w + 0.3), std({ color: 0x1c2026, roughness: 0.5, metalness: 0.5 }));
-    back.matrixAutoUpdate = false;
-    back.matrix.multiplyMatrices(m, new THREE.Matrix4().makeTranslation(-17.25, height + 0.8 + 0.25 + h / 2, 0));
+    const w = 32, h = w / BRAND.aspect.banner, y = height + 0.8 + 0.25 + h / 2;
+    const signGeo = new THREE.PlaneGeometry(w, h, 8, 1);
+    signGeo.rotateY(-Math.PI / 2);
+    signGeo.translate(-7.4, y, 0);
+    const sign = new THREE.Mesh(alongPits(track, signGeo, sMid), signMat);
+    const backGeo = new THREE.BoxGeometry(0.25, h + 0.2, w + 0.3, 1, 1, 8);
+    backGeo.translate(-7.25, y, 0);
+    const back = new THREE.Mesh(alongPits(track, backGeo, sMid), std({ color: 0x1c2026, roughness: 0.5, metalness: 0.5 }));
     back.castShadow = true;
     group.add(sign, back);
   }
@@ -398,6 +421,8 @@ function buildFloodlights({ track, terrain, U, group, tvSpots }) {
     const side = Math.floor(s / 34) % 2 ? 1 : -1;
     const wall = side > 0 ? track.wallL[f.i] : track.wallR[f.i];
     const d = side * (wall + 4.5);
+    // none in the pit lane
+    if (track.inPitArea(s, d, 1.5)) continue;
     const x = f.x + f.lx * d, z = f.z + f.lz * d;
     if (tvSpots.some((t) => Math.hypot(t.x - x, t.z - z) < 40)) continue;
     list.push({ x, z, y: terrain.heightAt(x, z) - 0.3, yaw: Math.atan2(-f.lx * side, -f.lz * side) });
@@ -659,7 +684,9 @@ function buildMarshalPosts({ track, terrain, U, group }) {
   const list = [];
   for (let s = 120; s < track.length; s += 330) {
     const f = track.frame(s, tmpF);
-    const side = f.kL > 0 ? -1 : 1;
+    // on the outside of the bend, or opposite the pit lane
+    let side = f.kL > 0 ? -1 : 1;
+    if (track.inPitArea(s, side * (track.wallL[f.i] + 2.2), 1.5)) side = -1;
     const wall = side > 0 ? track.wallL[f.i] : track.wallR[f.i];
     const d = side * (wall + 2.2);
     list.push(trackMatrix(track, s, d, track.heightAt(s, d, f) - 0.2));

@@ -6,6 +6,20 @@ export const BASE_ALT = 1390;
 export const LAKE_LEVEL = 1356 - BASE_ALT;
 const DS = 1; // dense sample spacing in metres
 
+// Pit lane, in metres from the road edge unless noted
+export const PIT = {
+  entry: 140, taper: 80,       // the entry leaves the track this far before the pits, widening from nothing
+  wall: 3.2, wallW: 0.45,      // pit wall
+  wallFrom: -20, wallTo: 30,   // the pit wall runs from 20 m before the pits to 30 m after them
+  inner: 4.4, outer: 16.4,     // lane edges in the pits
+  front: 17,                   // garage line
+  garages: [-170, 190],        // the pit building, from the start line
+  fastLane: 4.4,
+  exitLen: 390, exitW: 5, exitGap: 1.2  // exit road past the pits, its width, and the grass beside the Turn 1 kerb
+};
+const _laneFrame = {};
+const inRangeWrap = (s, a, b) => (a > b ? s >= a || s <= b : s >= a && s <= b);
+
 const catmull = (p0, p1, p2, p3, t) => {
   const t2 = t * t, t3 = t2 * t;
   return 0.5 * (2 * p1 + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 + (-p0 + 3 * p1 - 3 * p2 + p3) * t3);
@@ -325,25 +339,79 @@ export class Track {
     this.kerbL = map(fwd.kerbR); this.kerbR = map(fwd.kerbL);
     this.runL = map(fwd.runR); this.runR = map(fwd.runL);
     this.pitStart = this.wrap(this.length - fwd.pitEnd); this.pitEnd = this.wrap(this.length - fwd.pitStart);
+    this.pitWall = map(fwd.pitWall); this.pitFrom = map(fwd.pitFrom); this.pitTo = map(fwd.pitTo);
+    this.pitSide = -fwd.pitSide;
   }
 
   // Distance along the forward (anticlockwise) lap for a distance on this track
   forwardS(s) { return this.reversed ? this.wrap(this.length - s) : s; }
 
-  // The pit wall sits on the left of the main straight.
+  // The pit lane runs on the left of the main straight. The pit wall stands between it and the track from
+  // 20 m before the pits to 30 m after them, and the outer wall closes in to the garage line around it. The
+  // walls step rather than sweep across the lane.
   _pitWall() {
     const a = this.wrap(this.startLine - 260), b = this.wrap(this.startLine + 330);
     this.pitStart = a; this.pitEnd = b;
-    for (let i = 0; i < this.M; i++) {
+    const M = this.M;
+    this.pitSide = 1;
+    this.pitWall = new Uint8Array(M); this.pitFrom = new Float32Array(M); this.pitTo = new Float32Array(M);
+    const w0 = this.wrap(a + PIT.wallFrom), w1 = this.wrap(b + PIT.wallTo);
+    const lane = {};
+    for (let i = 0; i < M; i++) {
       const s = i * DS;
-      const inPit = a > b ? (s >= a || s <= b) : (s >= a && s <= b);
-      if (!inPit) continue;
       const e = this.half[i];
-      const edgeDist = Math.min(this.wrap(s - a), this.wrap(b - s));
-      const t = smoothstep(0, 60, edgeDist);
-      this.wallL[i] = this.wallL[i] + (e + 3.2 - this.wallL[i]) * t;
-      this.kerbL[i] *= 1 - t; this.runL[i] *= 1 - t;
+      const front = e + PIT.front;
+      if (inRangeWrap(s, w0, w1)) {
+        this.pitWall[i] = 1;
+        this.wallL[i] = e + PIT.wall;
+        this.kerbL[i] = 0; this.runL[i] = 0;
+        this.pitFrom[i] = e + PIT.wall + PIT.wallW; this.pitTo[i] = front;
+        continue;
+      }
+      // the outer wall closes in to the garage line over the 80 m before the pit wall and opens after it
+      const near = Math.min(this.wrap(w0 - s), this.wrap(s - w1));
+      if (near < 80) this.wallL[i] += (Math.min(this.wallL[i], front) - this.wallL[i]) * smoothstep(80, 0, near);
+      if (!this.laneAt(s, lane)) continue;
+      this.pitFrom[i] = lane.u < 0 ? e : lane.inner; this.pitTo[i] = lane.outer;
+      // the entry is paved from the track edge; along the exit road the inside of Turn 1 is grass
+      // where the exit road closes onto the track the kerb narrows and stops
+      if (lane.u < 0) this.kerbL[i] = 0;
+      else { const room = lane.inner - e - 0.2; this.kerbL[i] = room < 0.4 ? 0 : Math.min(this.kerbL[i], room); }
+      this.runL[i] = 0;
     }
+  }
+
+  // Pit lane edges at s on the forward lap (distance left of the centreline), or null away from it. The
+  // entry and the pits keep the original lane; after the pits a 5 m exit road runs round the inside of
+  // Turn 1, past the kerb and a strip of grass, and closes onto the track edge before Turn 2, as at the
+  // Red Bull Ring.
+  laneAt(s, out = {}) {
+    const a = this.wrap(this.pitStart - PIT.entry);
+    const k = this.wrap(s - a);
+    if (k > this.wrap(this.pitEnd + PIT.exitLen - a)) return null;
+    const e = this.frame(s, _laneFrame).half;
+    const ease = smoothstep(0, PIT.entry, k);
+    let inner = e + 0.2 + ease * (PIT.inner - 0.2);
+    const full = PIT.outer - PIT.inner;
+    let w = full * Math.max(4.2 / full, ease) * Math.min(1, k / PIT.taper);
+    const u = k - this.wrap(this.pitEnd - a);
+    if (u > 0) {
+      inner += (e + 1.6 + PIT.exitGap - inner) * smoothstep(30, 70, u);
+      w = full + (PIT.exitW - full) * smoothstep(0, 70, u);
+    }
+    if (u > 230) inner += (e - inner) * smoothstep(230, 310, u);
+    if (u > 310) w = PIT.exitW * (1 - smoothstep(310, 390, u));
+    out.inner = inner; out.outer = inner + w; out.u = u; out.e = e;
+    out.pits = inRangeWrap(s, this.wrap(this.pitStart + PIT.wallFrom), this.wrap(this.pitEnd + PIT.wallTo));
+    return out;
+  }
+
+  // Whether a point (forward lap) lies on the paved pit lane, its walkway or apron, within margin metres
+  inPitArea(s, d, margin = 0) {
+    const i = Math.round(this.wrap(s) / DS) % this.M;
+    if (!this.pitTo[i]) return false;
+    const k = d * this.pitSide;
+    return k > this.pitFrom[i] - margin && k < this.pitTo[i] + margin;
   }
 
   _otherSectionNear(x, z, i0, radius) {

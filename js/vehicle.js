@@ -1,5 +1,6 @@
 import { RHO, G } from './cars.js';
 import { clamp, smoothstep } from './noise.js';
+import { PIT } from './track.js';
 
 const ETA = 0.92; // drivetrain efficiency
 
@@ -162,7 +163,7 @@ export class Vehicle {
     const kerbW = (side ? tr.kerbL : tr.kerbR)[f.i] || 0;
     const runW = (side ? tr.runL : tr.runR)[f.i] || 0;
     let muS = 1, crr = car.crr;
-    if (ad <= e) this.surface = 'road';
+    if (ad <= e || tr.inPitArea(this.s, this.d)) this.surface = 'road';
     else if (ad <= e + kerbW) this.surface = 'kerb';
     else if (ad <= e + kerbW + runW) this.surface = 'runoff';
     else { this.surface = 'grass'; muS = 0.55; crr = 0.09; }
@@ -275,7 +276,21 @@ export class Vehicle {
 
     // Walls
     this.wallHit = Math.max(0, this.wallHit - dt);
-    const wl = tr.wallL[f.i] - 1.1, wr = -(tr.wallR[f.i] - 1.1);
+    let wl = tr.wallL[f.i] - 1.1, wr = -(tr.wallR[f.i] - 1.1);
+    // behind the pit wall the car is in the pit lane, between the wall and the garages
+    const pitK = this.d * tr.pitSide, pitWall = f.half + PIT.wall;
+    if (tr.pitWall[f.i]) {
+      if (!this.inPits && pitK > pitWall - 1.1 && pitK < pitWall + PIT.wallW + 1.1) {
+        // arriving at the end of the pit wall between the two lanes: a head-on hit
+        this.v *= 0.3; this.r *= 0.2; this.wallHit = 1;
+        this.d = tr.pitSide * (pitK > pitWall + PIT.wallW / 2 ? pitWall + PIT.wallW + 1.1 : pitWall - 1.1);
+      }
+      if (this.d * tr.pitSide > pitWall + PIT.wallW / 2) {
+        const lo = pitWall + PIT.wallW + 1.1, hi = tr.pitTo[f.i] - 1.1;
+        if (tr.pitSide > 0) { wl = hi; wr = lo; } else { wl = -lo; wr = -hi; }
+      }
+    }
+    this.inPits = !!tr.pitWall[f.i];
     if (this.d > wl || this.d < wr) {
       const into = this.d > wl ? Math.sin(this.psi) : -Math.sin(this.psi);
       this.d = clamp(this.d, wr, wl);
