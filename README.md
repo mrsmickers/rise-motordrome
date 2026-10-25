@@ -1,6 +1,6 @@
 # African Grand Prix
 
-Version 0.16 beta. Write-up: [I built a browser sim of F1's new Rwanda track](https://simonsmyth.me/i-built-a-browser-sim-of-f1s-new-rwanda-track/).
+Version 0.17 beta. Write-up: [I built a browser sim of F1's new Rwanda track](https://simonsmyth.me/i-built-a-browser-sim-of-f1s-new-rwanda-track/).
 
 A browser sim of the planned African Grand Prix circuit in Bugesera, Rwanda (interim name RISE Motordrome), built with three.js (WebGPU, with a WebGL 2 fallback). You drive or ride along in an F1 car on a 6 km, 17-turn lap with 197 m of climbing, beside a lake.
 
@@ -99,3 +99,7 @@ cd tools && python3 build_track.py
 | `models/rb22.glb`, `models/CREDITS.md` | The 2026 car model, its licence and the changes made |
 | `js/brand.js`, `brand/`, `tools/build_brand.py` | Sponsor colours and textures; the script rebuilds `brand/ingenio/` and `brand/assurix/` from the logos in `brand/src/` (needs Pillow) |
 | `tools/build_track.py`, `tools/base_centreline.json`, `tools/official_esses.json` | Track generator and the lines it reads |
+
+## Disclaimer
+
+An unofficial fan project. It is not affiliated with, endorsed by or connected to Formula 1, the FIA, the African Grand Prix organisers, Tilke, Dar, WurzDesign, The Race or PlanetF1. Formula 1, F1 and related marks belong to their owners. The circuit is an interpretation of published renders and interviews, not official data, and the final layout may differ. The 2026 car is Tyler_Dave's RB22 model, used under CC BY 4.0 with its team branding removed. The Ingenio Technologies and Assurix branding are placed by the author and are not real F1 sponsorships.
